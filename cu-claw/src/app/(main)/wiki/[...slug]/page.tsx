@@ -1,6 +1,6 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
-import { getWikiPage, getWikiTree } from "@/lib/wiki-actions";
+import { getWikiPage, getWikiTree, deleteWikiPage } from "@/lib/wiki-actions";
 import { WikiSidebar } from "@/components/layout/wiki-sidebar";
 import { WikiRenderer } from "@/components/wiki/wiki-renderer";
 import { Button } from "@/components/ui/button";
@@ -35,6 +35,19 @@ export default async function WikiReadPage({
               <Link href={`/wiki/edit/${slug}`}>
                 <Button size="sm">编辑</Button>
               </Link>
+            )}
+            {user?.role === "admin" && (
+              <form
+                action={async () => {
+                  "use server";
+                  await deleteWikiPage(page!.id);
+                  redirect("/wiki");
+                }}
+              >
+                <Button variant="destructive" size="sm" type="submit">
+                  删除
+                </Button>
+              </form>
             )}
           </div>
         </div>
