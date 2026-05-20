@@ -8,7 +8,7 @@ import {
   index,
   primaryKey,
 } from "drizzle-orm/pg-core";
-import { sql, relations } from "drizzle-orm";
+import { relations } from "drizzle-orm";
 
 export const users = pgTable("users", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -63,6 +63,12 @@ export const sessions = pgTable("sessions", {
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
   expires: timestamp("expires", { mode: "date" }).notNull(),
+});
+
+export const magicLinkRateLimits = pgTable("magic_link_rate_limits", {
+  identifier: text("identifier").primaryKey(),
+  lastAttemptedAt: timestamp("last_attempted_at").notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
 export const wikiPages = pgTable(

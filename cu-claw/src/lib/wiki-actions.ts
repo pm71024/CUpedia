@@ -1,5 +1,6 @@
 "use server";
 
+import Fuse from "fuse.js";
 import { db } from "@/db";
 import { wikiPages, wikiRevisions } from "@/db/schema";
 import { eq, isNull, and, sql, desc, inArray } from "drizzle-orm";
@@ -211,24 +212,30 @@ export async function rollbackToRevision(pageId: string, revisionId: string) {
 export async function searchWikiPages(query: string) {
   if (!query.trim()) return [];
 
-  const results = await db
+  const pages = await db
     .select({
       id: wikiPages.id,
       slug: wikiPages.slug,
       title: wikiPages.title,
-      rank: sql<number>`ts_rank(search_vector, plainto_tsquery('chinese', ${query}))`,
+      content: wikiPages.content,
     })
     .from(wikiPages)
-    .where(
-      and(
-        isNull(wikiPages.deletedAt),
-        sql`search_vector @@ plainto_tsquery('chinese', ${query})`
-      )
-    )
-    .orderBy(sql`ts_rank(search_vector, plainto_tsquery('chinese', ${query})) DESC`)
-    .limit(50);
+    .where(isNull(wikiPages.deletedAt));
 
-  return results;
+  const fuse = new Fuse(pages, {
+    keys: [
+      { name: "title", weight: 2 },
+      { name: "content", weight: 1 },
+    ],
+    threshold: 0.4,
+    includeScore: true,
+  });
+
+  return fuse.search(query, { limit: 50 }).map((r) => ({
+    id: r.item.id,
+    slug: r.item.slug,
+    title: r.item.title,
+  }));
 }
 
 export async function getDeletedPages() {

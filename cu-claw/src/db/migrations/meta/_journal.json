@@ -8,6 +8,27 @@
       "when": 1779162776944,
       "tag": "0000_nosy_rawhide_kid",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1779174972821,
+      "tag": "0001_safe_silverclaw",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1779262615227,
+      "tag": "0002_workable_lily_hollister",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1779436800000,
+      "tag": "0003_replace_zhparser_with_trgm",
+      "breakpoints": true
     }
   ]
 }
