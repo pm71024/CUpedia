@@ -21,12 +21,25 @@ describe("parseNotionFilename", () => {
   });
 });
 
+describe("scanDir subdirectory matching", () => {
+  it("parseNotionFilename title matches subdirectory name", () => {
+    const filename = "入学准备（必读） d690968336b54660b20c78baf8c85646.md";
+    const { title } = parseNotionFilename(filename);
+    const expectedSubDir = "入学准备（必读）";
+    expect(title).toBe(expectedSubDir);
+
+    // The old buggy approach produces the wrong result
+    const buggyDirName = filename.replace(/\.md$/, "");
+    expect(buggyDirName).not.toBe(expectedSubDir);
+  });
+});
+
 describe("generateSlug (used by import)", () => {
-  it("converts Chinese to pinyin slug", () => {
-    expect(generateSlug("八达通")).toBe("ba-da-tong");
+  it("keeps Chinese characters in slug", () => {
+    expect(generateSlug("八达通")).toBe("八达通");
   });
 
   it("handles mixed content", () => {
-    expect(generateSlug("CU 全港觅食指南")).toMatch(/^cu-/);
+    expect(generateSlug("CU 全港觅食指南")).toBe("cu-全港觅食指南");
   });
 });

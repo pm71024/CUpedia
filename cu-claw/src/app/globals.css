@@ -118,6 +118,15 @@
 }
 
 @layer base {
+  :root {
+    --sidebar-width: 240px;
+    --sidebar-collapsed-width: 44px;
+    --sidebar-bg: #f7f7f5;
+    --sidebar-border-color: #e8e5e0;
+    --sidebar-active-bg: #e8e5e0;
+    --sidebar-transition: 200ms ease;
+    --content-max-width: 720px;
+  }
   * {
     @apply border-border outline-ring/50;
   }

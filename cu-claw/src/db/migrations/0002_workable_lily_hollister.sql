@@ -1,0 +1,1 @@
+ALTER TABLE "wiki_pages" ADD COLUMN "search_vector" "tsvector";

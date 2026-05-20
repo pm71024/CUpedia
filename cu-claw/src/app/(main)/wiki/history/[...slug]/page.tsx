@@ -1,12 +1,40 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { getWikiPage, getRevisions, getRevision, rollbackToRevision } from "@/lib/wiki-actions";
+import {
+  getWikiPage,
+  getWikiTree,
+  getRevisions,
+  getRevision,
+  rollbackToRevision,
+} from "@/lib/wiki-actions";
+import { WikiSidebar } from "@/components/layout/wiki-sidebar";
+import { SidebarToggle } from "@/components/layout/sidebar-toggle";
 import { RevisionList } from "@/components/wiki/revision-list";
 import { RevisionDiff } from "@/components/wiki/revision-diff";
 import { WikiRenderer } from "@/components/wiki/wiki-renderer";
 import { Button } from "@/components/ui/button";
 import { getOptionalUser } from "@/lib/auth-guard";
 import { redirect } from "next/navigation";
+
+function SidebarWrapper({
+  pages,
+  children,
+}: {
+  pages: any[];
+  children: React.ReactNode;
+}) {
+  return (
+    <>
+      <SidebarToggle />
+      <WikiSidebar pages={pages} />
+      <div className="flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-[var(--content-max-width)] space-y-4 px-6 py-6">
+          {children}
+        </div>
+      </div>
+    </>
+  );
+}
 
 export default async function HistoryPage({
   params,
@@ -16,9 +44,12 @@ export default async function HistoryPage({
   searchParams: Promise<{ view?: string; diff?: string; with?: string }>;
 }) {
   const { slug: slugParts } = await params;
-  const slug = slugParts.join("/");
+  const slug = slugParts.map(decodeURIComponent).join("/");
   const sp = await searchParams;
-  const page = await getWikiPage(slug);
+  const [page, pages] = await Promise.all([
+    getWikiPage(slug),
+    getWikiTree(),
+  ]);
   if (!page) notFound();
 
   const revisions = await getRevisions(page.id);
@@ -35,8 +66,11 @@ export default async function HistoryPage({
     }
 
     return (
-      <div className="max-w-4xl space-y-4">
-        <Link href={`/wiki/history/${slug}`} className="text-sm text-blue-600 hover:underline">
+      <SidebarWrapper pages={pages}>
+        <Link
+          href={`/wiki/history/${slug}`}
+          className="text-sm text-blue-600 hover:underline"
+        >
           &larr; 返回历史
         </Link>
         <h1 className="text-xl font-bold">历史版本：{rev.title}</h1>
@@ -51,7 +85,7 @@ export default async function HistoryPage({
           </form>
         )}
         <WikiRenderer content={rev.content} />
-      </div>
+      </SidebarWrapper>
     );
   }
 
@@ -63,8 +97,11 @@ export default async function HistoryPage({
     if (!older || !newer) notFound();
 
     return (
-      <div className="max-w-4xl space-y-4">
-        <Link href={`/wiki/history/${slug}`} className="text-sm text-blue-600 hover:underline">
+      <SidebarWrapper pages={pages}>
+        <Link
+          href={`/wiki/history/${slug}`}
+          className="text-sm text-blue-600 hover:underline"
+        >
           &larr; 返回历史
         </Link>
         <h1 className="text-xl font-bold">版本对比</h1>
@@ -74,19 +111,21 @@ export default async function HistoryPage({
           oldLabel={older.createdAt.toLocaleString("zh-CN")}
           newLabel={newer.createdAt.toLocaleString("zh-CN")}
         />
-      </div>
+      </SidebarWrapper>
     );
   }
 
   return (
-    <div className="max-w-4xl space-y-4">
+    <SidebarWrapper pages={pages}>
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold">编辑历史：{page.title}</h1>
         <Link href={`/wiki/${slug}`}>
-          <Button variant="outline" size="sm">返回页面</Button>
+          <Button variant="outline" size="sm">
+            返回页面
+          </Button>
         </Link>
       </div>
       <RevisionList revisions={revisions} slug={slug} />
-    </div>
+    </SidebarWrapper>
   );
 }

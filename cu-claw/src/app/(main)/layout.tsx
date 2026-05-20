@@ -1,10 +1,15 @@
 import { Navbar } from "@/components/layout/navbar";
+import { SidebarProvider } from "@/components/layout/sidebar-provider";
 
-export default function MainLayout({ children }: { children: React.ReactNode }) {
+export default function MainLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
-    <>
+    <SidebarProvider>
       <Navbar />
-      <main className="mx-auto max-w-7xl px-4 py-6">{children}</main>
-    </>
+      <main className="flex min-h-[calc(100vh-3.5rem)]">{children}</main>
+    </SidebarProvider>
   );
 }
