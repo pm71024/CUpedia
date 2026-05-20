@@ -113,7 +113,7 @@ export default function LoginPage() {
   return (
     <Card className="w-full max-w-md">
       <CardHeader>
-        <CardTitle>登录 CUHK Wiki</CardTitle>
+        <CardTitle>登录 CUpedia</CardTitle>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">

@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "CUHK Wiki",
+  title: "CUpedia",
   description: "你的中大百科全书",
 };
 

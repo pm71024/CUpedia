@@ -70,7 +70,7 @@ export function Navbar() {
               </button>
             )}
             <Link href="/wiki" className="text-lg font-bold">
-              CUHK Wiki
+              CUpedia
             </Link>
           </div>
           <nav className="flex items-center gap-4">

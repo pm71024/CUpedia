@@ -75,9 +75,9 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           body: JSON.stringify({
             sender: { email: provider.from },
             to: [{ email: normalized }],
-            subject: "登录 CUHK Wiki",
+            subject: "登录 CUpedia",
             textContent: `点击以下链接登录：${url}`,
-            htmlContent: `<p>点击以下链接登录 CUHK Wiki：</p><p><a href="${url}">登录</a></p>`,
+            htmlContent: `<p>点击以下链接登录 CUpedia：</p><p><a href="${url}">登录</a></p>`,
           }),
         });
 

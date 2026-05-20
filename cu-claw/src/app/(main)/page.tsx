@@ -14,7 +14,7 @@ export default function HomePage() {
   return (
     <div className="mx-auto w-full max-w-7xl space-y-8 px-4 py-6">
       <div className="text-center">
-        <h1 className="text-3xl font-bold">CUHK Wiki</h1>
+        <h1 className="text-3xl font-bold">CUpedia</h1>
         <p className="mt-2 text-muted-foreground">你的中大百科全书</p>
       </div>
       <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
