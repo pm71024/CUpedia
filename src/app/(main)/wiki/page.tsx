@@ -38,6 +38,7 @@ export default async function WikiIndexPage() {
                   <Link
                     key={cat.id}
                     href={`/wiki/${cat.slug}`}
+                    prefetch={false}
                     className="rounded-lg border bg-[var(--sidebar-bg)] p-4 hover:border-foreground/20"
                     style={{ borderColor: "var(--sidebar-border-color)" }}
                   >
@@ -59,6 +60,7 @@ export default async function WikiIndexPage() {
                   <Link
                     key={p.id}
                     href={`/wiki/${p.slug}`}
+                    prefetch={false}
                     className="flex items-center justify-between rounded-lg bg-secondary/50 px-4 py-3 hover:bg-secondary"
                   >
                     <div className="text-sm">{p.title}</div>

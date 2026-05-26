@@ -86,6 +86,7 @@ function ChildItem({
         )}
         <Link
           href={href}
+          prefetch={false}
           onClick={isMobile ? closeMobile : undefined}
           className={cn(
             "block flex-1 truncate rounded px-2 py-1 text-sm hover:bg-[var(--sidebar-active-bg)]",
@@ -141,6 +142,7 @@ function SectionGroup({
         </button>
         <Link
           href={href}
+          prefetch={false}
           onClick={isMobile ? closeMobile : undefined}
           className={cn(
             "block flex-1 truncate text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground",
