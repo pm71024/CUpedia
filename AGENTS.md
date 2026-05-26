@@ -7,7 +7,7 @@
 Next.js 16 App Router wiki application for CUHK students ("你的中大百科全书").
 
 ```
-CUpedia/
+.
 ├── src/
 │   ├── app/              # App Router pages & API routes
 │   │   ├── (auth)/       # Login, nickname setup
@@ -283,7 +283,7 @@ If any fails, fix first. Do not create a PR or claim completion with failing che
 When using git worktrees for parallel development:
 
 1. **Create**: `git worktree add wt/<name> -b <branch> main`
-2. **Bootstrap**: `cd wt/<name>/CUpedia && pnpm install`
+2. **Bootstrap**: `cd wt/<name> && pnpm install`
 3. **Code & verify**: use WIP profile while iterating, Ready profile before commit
 4. **Push**: confirm push succeeds before any cleanup
 5. **Merge**: `gh pr merge --squash --delete-branch`

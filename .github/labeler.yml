@@ -1,49 +1,49 @@
 "area: auth":
   - changed-files:
       - any-glob-to-any-file:
-          - CUpedia/src/lib/auth*.ts
-          - CUpedia/src/app/(auth)/**
-          - CUpedia/src/app/api/auth/**
+          - src/lib/auth*.ts
+          - src/app/(auth)/**
+          - src/app/api/auth/**
 
 "area: wiki":
   - changed-files:
       - any-glob-to-any-file:
-          - CUpedia/src/lib/wiki-actions.ts
-          - CUpedia/src/lib/wiki-homepage.ts
-          - CUpedia/src/app/(main)/wiki/**
-          - CUpedia/src/components/wiki/**
+          - src/lib/wiki-actions.ts
+          - src/lib/wiki-homepage.ts
+          - src/app/(main)/wiki/**
+          - src/components/wiki/**
 
 "area: admin":
   - changed-files:
       - any-glob-to-any-file:
-          - CUpedia/src/lib/admin-actions.ts
-          - CUpedia/src/app/admin/**
-          - CUpedia/src/components/admin/**
+          - src/lib/admin-actions.ts
+          - src/app/admin/**
+          - src/components/admin/**
 
 "area: ui":
   - changed-files:
       - any-glob-to-any-file:
-          - CUpedia/src/components/ui/**
-          - CUpedia/src/components/layout/**
-          - CUpedia/src/app/globals.css
+          - src/components/ui/**
+          - src/components/layout/**
+          - src/app/globals.css
 
 "area: db":
   - changed-files:
       - any-glob-to-any-file:
-          - CUpedia/src/db/**
-          - CUpedia/drizzle.config.ts
+          - src/db/**
+          - drizzle.config.ts
 
 "area: infra":
   - changed-files:
       - any-glob-to-any-file:
-          - CUpedia/Dockerfile
-          - CUpedia/Caddyfile
+          - Dockerfile
+          - Caddyfile
           - docker-compose.yml
           - .github/**
 
 "area: docs":
   - changed-files:
       - any-glob-to-any-file:
-          - '**/*.md'
-          - CUpedia/AGENTS.md
+          - "**/*.md"
+          - AGENTS.md
           - CONTRIBUTING.md

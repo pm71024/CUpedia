@@ -3,18 +3,12 @@ name: CI
 on:
   push:
     branches: [main]
-    paths: ['CUpedia/**']
   pull_request:
     branches: [main]
-    paths: ['CUpedia/**']
 
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
-
-defaults:
-  run:
-    working-directory: CUpedia
 
 jobs:
   lint-and-test:
@@ -30,7 +24,6 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
-          cache-dependency-path: CUpedia/pnpm-lock.yaml
 
       - run: pnpm install --frozen-lockfile
 
@@ -54,7 +47,6 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
-          cache-dependency-path: CUpedia/pnpm-lock.yaml
 
       - run: pnpm install --frozen-lockfile
 

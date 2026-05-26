@@ -14,7 +14,6 @@ Thanks for your interest in contributing!
 2. Start the infrastructure:
 
    ```bash
-   cd CUpedia
    docker compose up -d db minio
    ```
 
