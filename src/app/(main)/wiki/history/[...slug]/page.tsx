@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { getOptionalUser } from "@/lib/auth-guard";
 import { getWikiEditRole } from "@/lib/site-settings";
 import { redirect } from "next/navigation";
+import { deserializeContent } from "@/lib/plate-utils";
 
 function SidebarWrapper({
   pages,
@@ -84,7 +85,7 @@ export default async function HistoryPage({
         </Link>
         <h1 className="text-xl font-bold">历史版本：{rev.title}</h1>
         <p className="text-xs text-muted-foreground">
-          {rev.createdAt.toLocaleString("zh-CN")}
+          {new Date(rev.createdAt).toLocaleString("zh-CN")}
         </p>
         {canEdit && (
           <form action={handleRollback}>
@@ -93,7 +94,7 @@ export default async function HistoryPage({
             </Button>
           </form>
         )}
-        <WikiRenderer content={rev.content} />
+        <WikiRenderer value={deserializeContent(rev.content)} />
       </SidebarWrapper>
     );
   }
@@ -117,8 +118,8 @@ export default async function HistoryPage({
         <RevisionDiff
           oldText={older.content}
           newText={newer.content}
-          oldLabel={older.createdAt.toLocaleString("zh-CN")}
-          newLabel={newer.createdAt.toLocaleString("zh-CN")}
+          oldLabel={new Date(older.createdAt).toLocaleString("zh-CN")}
+          newLabel={new Date(newer.createdAt).toLocaleString("zh-CN")}
         />
       </SidebarWrapper>
     );
