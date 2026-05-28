@@ -66,6 +66,17 @@ describe("extractText", () => {
     expect(extractText("")).toBe("");
     expect(extractText("  ")).toBe("");
   });
+
+  it("extracts text from callout blocks", () => {
+    const json = JSON.stringify([
+      {
+        type: "callout",
+        variant: "warning",
+        children: [{ text: "This is a warning" }],
+      },
+    ]);
+    expect(extractText(json)).toBe("This is a warning");
+  });
 });
 
 describe("toMarkdown", () => {
@@ -77,6 +88,19 @@ describe("toMarkdown", () => {
     const md = await toMarkdown(json);
     expect(md).toContain("## Title");
     expect(md).toContain("Body");
+  });
+
+  it("preserves callout text in markdown output", async () => {
+    const json = JSON.stringify([
+      {
+        type: "callout",
+        variant: "warning",
+        icon: "⚠️",
+        children: [{ text: "Warning content here" }],
+      },
+    ]);
+    const md = await toMarkdown(json);
+    expect(md).toContain("Warning content here");
   });
 });
 

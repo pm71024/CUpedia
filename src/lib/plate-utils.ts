@@ -49,6 +49,7 @@ async function createHeadlessEditor() {
     BaseCodePlugin,
     BaseStrikethroughPlugin,
   } = await import("@platejs/basic-nodes");
+  const { BaseCalloutPlugin } = await import("@platejs/callout");
   const { BaseCodeBlockPlugin, BaseCodeLinePlugin } =
     await import("@platejs/code-block");
   const { BaseLinkPlugin } = await import("@platejs/link");
@@ -61,10 +62,13 @@ async function createHeadlessEditor() {
     BaseTableCellHeaderPlugin,
   } = await import("@platejs/table");
   const remarkGfm = (await import("remark-gfm")).default;
+  const { calloutMarkdownRules } =
+    await import("@/components/editor/plugins/markdown-kit");
 
   return createSlateEditor({
     plugins: [
       BaseParagraphPlugin,
+      BaseCalloutPlugin,
       BaseH1Plugin,
       BaseH2Plugin,
       BaseH3Plugin,
@@ -88,7 +92,7 @@ async function createHeadlessEditor() {
       BaseTableCellPlugin,
       BaseTableCellHeaderPlugin,
       MarkdownPlugin.configure({
-        options: { remarkPlugins: [remarkGfm] },
+        options: { remarkPlugins: [remarkGfm], rules: calloutMarkdownRules },
       }),
     ],
   });
