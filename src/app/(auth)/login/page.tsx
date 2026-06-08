@@ -172,6 +172,7 @@ export default function LoginPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
+                autoComplete="username"
               />
             </div>
             <div className="space-y-2">
@@ -184,22 +185,19 @@ export default function LoginPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 minLength={8}
+                autoComplete="current-password"
               />
             </div>
             {error && <p className="text-sm text-red-500">{error}</p>}
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? "登录中..." : "登录"}
             </Button>
-            <button
-              type="button"
+            <Link
+              href="/reset-password"
               className="block w-full text-center text-sm text-muted-foreground hover:text-primary"
-              onClick={() => {
-                setTab("otp");
-                setError("");
-              }}
             >
-              忘记密码？使用邮箱验证码登录
-            </button>
+              忘记密码？
+            </Link>
             <p className="text-center text-sm text-muted-foreground">
               还没有账号？
               <Link href="/register" className="text-primary hover:underline">
