@@ -11,9 +11,10 @@ import {
   index,
   uniqueIndex,
   primaryKey,
+  check,
 } from "drizzle-orm/pg-core";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 
 // ── Better Auth core tables ──
 
@@ -456,4 +457,203 @@ export const courseReviewLikes = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
   },
   (table) => [primaryKey({ columns: [table.reviewId, table.userId] })],
+);
+
+// ── Canteen subsystem (hard delete; no deletedAt — unlike wiki soft delete) ──
+
+export const MEAL_PERIODS = ["breakfast", "lunch", "dinner"] as const;
+export type MealPeriod = (typeof MEAL_PERIODS)[number];
+
+export const canteens = pgTable("canteens", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  name: text("name").notNull(),
+  location: text("location"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const canteenMenuItems = pgTable(
+  "canteen_menu_items",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    canteenId: uuid("canteen_id")
+      .notNull()
+      .references(() => canteens.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    price: integer("price"),
+    mealPeriod: text("meal_period").notNull().default("lunch"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    svgKey: text("svg_key").notNull().default("default"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("canteen_menu_items_canteen_id_idx").on(table.canteenId),
+    index("canteen_menu_items_canteen_meal_idx").on(
+      table.canteenId,
+      table.mealPeriod,
+    ),
+  ],
+);
+
+export const canteensRelations = relations(canteens, ({ many }) => ({
+  menuItems: many(canteenMenuItems),
+  importDrafts: many(menuImportDrafts),
+}));
+
+export const canteenMenuItemsRelations = relations(
+  canteenMenuItems,
+  ({ one, many }) => ({
+    canteen: one(canteens, {
+      fields: [canteenMenuItems.canteenId],
+      references: [canteens.id],
+    }),
+    votes: many(canteenDishVotes),
+    comments: many(canteenDishComments),
+  }),
+);
+
+export const VOTE_VALUES = ["like", "dislike"] as const;
+export type VoteValue = (typeof VOTE_VALUES)[number];
+
+export const canteenDishVotes = pgTable(
+  "canteen_dish_votes",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    menuItemId: uuid("menu_item_id")
+      .notNull()
+      .references(() => canteenMenuItems.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").references(() => users.id),
+    anonymousSessionId: uuid("anonymous_session_id"),
+    vote: text("vote"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("canteen_dish_votes_menu_item_id_idx").on(table.menuItemId),
+    index("canteen_dish_votes_user_id_idx").on(table.userId),
+    index("canteen_dish_votes_anon_session_id_idx").on(
+      table.anonymousSessionId,
+    ),
+    uniqueIndex("canteen_dish_votes_user_menu_item_uidx")
+      .on(table.userId, table.menuItemId)
+      .where(sql`${table.userId} IS NOT NULL`),
+    uniqueIndex("canteen_dish_votes_anon_menu_item_uidx")
+      .on(table.anonymousSessionId, table.menuItemId)
+      .where(sql`${table.anonymousSessionId} IS NOT NULL`),
+    check(
+      "canteen_dish_votes_identity_chk",
+      sql`(
+        (${table.userId} IS NOT NULL AND ${table.anonymousSessionId} IS NULL) OR
+        (${table.userId} IS NULL AND ${table.anonymousSessionId} IS NOT NULL)
+      )`,
+    ),
+  ],
+);
+
+export const canteenDishVotesRelations = relations(
+  canteenDishVotes,
+  ({ one }) => ({
+    menuItem: one(canteenMenuItems, {
+      fields: [canteenDishVotes.menuItemId],
+      references: [canteenMenuItems.id],
+    }),
+    user: one(users, {
+      fields: [canteenDishVotes.userId],
+      references: [users.id],
+    }),
+  }),
+);
+
+export const canteenDishComments = pgTable(
+  "canteen_dish_comments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    menuItemId: uuid("menu_item_id")
+      .notNull()
+      .references(() => canteenMenuItems.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    content: text("content").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("canteen_dish_comments_menu_item_id_idx").on(table.menuItemId),
+    index("canteen_dish_comments_user_id_idx").on(table.userId),
+  ],
+);
+
+export const canteenDishCommentsRelations = relations(
+  canteenDishComments,
+  ({ one }) => ({
+    menuItem: one(canteenMenuItems, {
+      fields: [canteenDishComments.menuItemId],
+      references: [canteenMenuItems.id],
+    }),
+    user: one(users, {
+      fields: [canteenDishComments.userId],
+      references: [users.id],
+    }),
+  }),
+);
+
+export const menuImportDrafts = pgTable(
+  "menu_import_drafts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    canteenId: uuid("canteen_id")
+      .notNull()
+      .references(() => canteens.id, { onDelete: "cascade" }),
+    sourceImageUrl: text("source_image_url").notNull(),
+    ocrRawText: text("ocr_raw_text"),
+    items: jsonb("items")
+      .notNull()
+      .$type<import("@/lib/canteen-types").MenuImportDraftItem[]>(),
+    status: text("status").notNull().default("ready"),
+    errorMessage: text("error_message"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [index("menu_import_drafts_canteen_id_idx").on(table.canteenId)],
+);
+
+export const menuImportDraftsRelations = relations(
+  menuImportDrafts,
+  ({ one }) => ({
+    canteen: one(canteens, {
+      fields: [menuImportDrafts.canteenId],
+      references: [canteens.id],
+    }),
+  }),
+);
+
+// ── Homepage monthly danmaku (#192) ──
+
+export const danmakuMessages = pgTable(
+  "danmaku_messages",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    content: text("content").notNull(),
+    month: text("month").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("danmaku_messages_month_idx").on(table.month),
+    index("danmaku_messages_user_id_idx").on(table.userId),
+  ],
+);
+
+export const danmakuMessagesRelations = relations(
+  danmakuMessages,
+  ({ one }) => ({
+    user: one(users, {
+      fields: [danmakuMessages.userId],
+      references: [users.id],
+    }),
+  }),
 );

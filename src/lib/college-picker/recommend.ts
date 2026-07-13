@@ -222,9 +222,7 @@ function takeById(
  * 对应裁决：A/B/C 分区优先，避雷只在分区内排末尾。
  */
 function orderSmallBlock(small: ScoredCollege[]): ScoredCollege[] {
-  const clean = small
-    .filter((x) => !isBlockedByAvoids(x))
-    .sort(baseComparator);
+  const clean = small.filter((x) => !isBlockedByAvoids(x)).sort(baseComparator);
   const blocked = small.filter(isBlockedByAvoids).sort(baseComparator);
   return [...clean, ...blocked];
 }
@@ -283,10 +281,8 @@ function pickSecondThird(nonSmallSorted: ScoredCollege[]): ScoredCollege[] {
 
   const second = pool.shift();
   const third = pool.shift();
-  if (second)
-    second.reasons = second.reasons.concat("按中/大书院得分排序");
-  if (third)
-    third.reasons = third.reasons.concat("按中/大书院得分排序");
+  if (second) second.reasons = second.reasons.concat("按中/大书院得分排序");
+  if (third) third.reasons = third.reasons.concat("按中/大书院得分排序");
   return [second, third].filter(Boolean) as ScoredCollege[];
 }
 
@@ -363,25 +359,58 @@ export function computeSmallCollegeSpecialization(
 
   // (2) 录取形式倾向
   switch (answers.q2) {
-    case "A": shho += 10; break;
-    case "B": mc += 10; break;
-    case "C": cwc += 10; break;
-    case "D": mc += 3; shho += 3; cwc += 5; break;
-    case "E": mc += 7; shho += 7; cwc += 7; break;
+    case "A":
+      shho += 10;
+      break;
+    case "B":
+      mc += 10;
+      break;
+    case "C":
+      cwc += 10;
+      break;
+    case "D":
+      mc += 3;
+      shho += 3;
+      cwc += 5;
+      break;
+    case "E":
+      mc += 7;
+      shho += 7;
+      cwc += 7;
+      break;
   }
 
   // (3) 社群社交倾向
   switch (answers.q3) {
-    case "A": mc += 10; break;
-    case "B": cwc += 10; break;
-    case "C": shho += 10; break;
-    case "D": mc += 7; shho += 7; cwc += 7; break;
+    case "A":
+      mc += 10;
+      break;
+    case "B":
+      cwc += 10;
+      break;
+    case "C":
+      shho += 10;
+      break;
+    case "D":
+      mc += 7;
+      shho += 7;
+      cwc += 7;
+      break;
   }
   // (4) 日常生活期望
   switch (answers.q4) {
-    case "A": cwc += 10; break;
-    case "B": shho += 10; mc += 8; break;
-    case "C": mc += 5; shho += 5; cwc += 7; break;
+    case "A":
+      cwc += 10;
+      break;
+    case "B":
+      shho += 10;
+      mc += 8;
+      break;
+    case "C":
+      mc += 5;
+      shho += 5;
+      cwc += 7;
+      break;
   }
 
   // 敬文专属评分封顶 50
@@ -413,8 +442,7 @@ function applyVolunteerOrdering(
     mode = "tail";
   } else {
     const topOverall = scored.slice().sort(baseComparator)[0];
-    mode =
-      topOverall && SMALL_SET.has(topOverall.id) ? "first" : "tail";
+    mode = topOverall && SMALL_SET.has(topOverall.id) ? "first" : "tail";
   }
 
   const small = scored.filter((x) => SMALL_SET.has(x.id));
@@ -446,9 +474,7 @@ function applyVolunteerOrdering(
             : "已选「冲小书院」，第一志愿强制为推荐指数最高的小书院"
           : "推荐指数最高的书院为小书院，作为第一志愿",
       );
-      tailSmall.forEach((x) =>
-        x.reasons.push("剩余小书院排到第 8–9 志愿"),
-      );
+      tailSmall.forEach((x) => x.reasons.push("剩余小书院排到第 8–9 志愿"));
     }
     return [slot1, ...nonSmallOrdered, ...tailSmall].filter(
       Boolean,

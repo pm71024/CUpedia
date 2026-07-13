@@ -79,12 +79,17 @@ const SC_QUESTIONS: {
         label: "录取优先：录取机会大于一切",
         footnote: "*基于过往经验。过多人申请相同小书院会导致竞争加剧",
       },
-      { id: "B", label: "静观沉浮：有机会录取小书院更好，但也没那么在意", footnote: "*进入大/中书院同样有机会争取四年保宿" },
+      {
+        id: "B",
+        label: "静观沉浮：有机会录取小书院更好，但也没那么在意",
+        footnote: "*进入大/中书院同样有机会争取四年保宿",
+      },
     ],
   },
   {
     id: "q2",
-    prompt: "小书院除了都需要填表格之外，录取的主要机制如下（描述基于2024/2025年申请方式，以书院公示为准）：",
+    prompt:
+      "小书院除了都需要填表格之外，录取的主要机制如下（描述基于2024/2025年申请方式，以书院公示为准）：",
     subText:
       "善衡：拍视频介绍自己\n晨兴：网上面试/线下面试，更加重视英语能力\n敬文：英语面试，部分普通话交流，casual talk",
     options: [
@@ -215,10 +220,7 @@ export function CollegePickerForm() {
     reset();
   }
 
-  function handlePriorityChange(
-    index: number,
-    raw: string,
-  ) {
+  function handlePriorityChange(index: number, raw: string) {
     const value = fromSelectValue(raw ?? "");
 
     // 不允许跳位：P2 为空时 P3 只能选 None
@@ -229,9 +231,7 @@ export function CollegePickerForm() {
 
     // 不允许重复选同一因素
     if (value !== "") {
-      const otherValues = priorities.filter(
-        (p, i) => i !== index && p !== "",
-      );
+      const otherValues = priorities.filter((p, i) => i !== index && p !== "");
       if (otherValues.includes(value as ScoredFactor)) {
         toast.error("该因素已被选择！");
         return;
@@ -280,9 +280,7 @@ export function CollegePickerForm() {
         smallCollegePreference: preference,
         bonusFactors,
         smallCollegeAnswers:
-          preference === "aim"
-            ? (scAnswers as SmallCollegeAnswers)
-            : undefined,
+          preference === "aim" ? (scAnswers as SmallCollegeAnswers) : undefined,
       }),
     );
   }
@@ -373,9 +371,7 @@ export function CollegePickerForm() {
                   <Select
                     items={FACTOR_ITEMS}
                     value={toSelectValue(factor)}
-                    onValueChange={(v) =>
-                      handlePriorityChange(index, v ?? "")
-                    }
+                    onValueChange={(v) => handlePriorityChange(index, v ?? "")}
                   >
                     <SelectTrigger data-testid={`priority-${index}`}>
                       <SelectValue />
@@ -388,13 +384,11 @@ export function CollegePickerForm() {
                         </SelectItem>
                       )}
                       {SCORED_FACTORS.map((f) => {
-                        const isDuplicate =
-                          priorities.some(
-                            (p, i) => i !== index && p === f.id,
-                          );
+                        const isDuplicate = priorities.some(
+                          (p, i) => i !== index && p === f.id,
+                        );
                         const isSkipLocked =
-                          index === 2 &&
-                          priorities[1] === "";
+                          index === 2 && priorities[1] === "";
                         const dimmed = isDuplicate || isSkipLocked;
                         return (
                           <SelectItem

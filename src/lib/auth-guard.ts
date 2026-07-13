@@ -112,3 +112,98 @@ export async function getViewerEditContext() {
   ]);
   return { user, canEdit: canViewerEdit(user, editRole) };
 }
+
+/** One session + user fetch for canteen voting hot paths. */
+export async function getSessionVoterUser(): Promise<{
+  id: string;
+  banned: boolean;
+} | null> {
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session?.user?.id) return null;
+
+  if (process.env.CANTEEN_MOCK_DATA === "true") {
+    return { id: session.user.id, banned: false };
+  }
+
+  const dbUser = await db.query.users.findFirst({
+    where: eq(users.id, session.user.id),
+    columns: { id: true, banned: true },
+  });
+  return dbUser ? { id: dbUser.id, banned: dbUser.banned } : null;
+}
+
+/** Logged-in user eligible to write dish comments (not banned). */
+export async function requireCommentAuth(): Promise<{
+  id: string;
+  nickname: string;
+}> {
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session?.user?.id) redirect("/login");
+
+  if (process.env.CANTEEN_MOCK_DATA === "true") {
+    const nickname =
+      session.user.name?.trim() || session.user.email?.split("@")[0] || "用户";
+    return { id: session.user.id, nickname };
+  }
+
+  const dbUser = await db.query.users.findFirst({
+    where: eq(users.id, session.user.id),
+    columns: { id: true, nickname: true, banned: true },
+  });
+  if (!dbUser || dbUser.banned) redirect("/login?error=banned");
+  return { id: dbUser.id, nickname: dbUser.nickname };
+}
+
+/** Logged-in voter eligible to write (not banned). Anonymous callers get null. */
+export async function getVoteEligibleUser(): Promise<{ id: string } | null> {
+  const user = await getSessionVoterUser();
+  return user && !user.banned ? { id: user.id } : null;
+}
+
+/** Session present but user is banned — block even anonymous fallback voting. */
+export async function isBannedSessionUser(): Promise<boolean> {
+  const user = await getSessionVoterUser();
+  return user?.banned ?? false;
+}
+
+/** For API routes: returns null when caller is not an admin (no redirect). */
+export async function getAdminUserForApi() {
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session?.user?.id) return null;
+
+  const dbUser = await db.query.users.findFirst({
+    where: eq(users.id, session.user.id),
+    columns: {
+      id: true,
+      email: true,
+      nickname: true,
+      role: true,
+      banned: true,
+    },
+  });
+  if (!dbUser || dbUser.banned || dbUser.role !== "admin") return null;
+  return {
+    id: dbUser.id,
+    email: dbUser.email,
+    nickname: dbUser.nickname,
+    role: dbUser.role,
+  };
+}
+
+/** For API routes: logged-in, non-banned author, or null when anonymous. */
+export async function getDanmakuAuthorForApi(): Promise<{
+  id: string;
+  nickname: string;
+  banned: boolean;
+} | null> {
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session?.user?.id) return null;
+
+  const dbUser = await db.query.users.findFirst({
+    where: eq(users.id, session.user.id),
+    columns: { id: true, nickname: true, banned: true },
+  });
+  return dbUser
+    ? { id: dbUser.id, nickname: dbUser.nickname, banned: dbUser.banned }
+    : null;
+}
