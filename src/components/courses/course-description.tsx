@@ -22,9 +22,7 @@ export function CourseDescription({ text }: { text: string }) {
     if (!el) return;
 
     const check = () => {
-      const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 22.75;
-      const maxClamped = lineHeight * 4;
-      setOverflow(el.clientHeight >= maxClamped - 1);
+      setOverflow(el.scrollHeight > el.clientHeight);
     };
 
     const observer = new ResizeObserver(check);
