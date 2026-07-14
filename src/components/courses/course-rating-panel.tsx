@@ -42,7 +42,7 @@ export function CourseRatingPanel({
   }
 
   return (
-    <section className="rounded-2xl border p-6">
+    <section className="rounded-2xl border p-4 sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h2 className="text-lg font-semibold">给这门课打分</h2>
@@ -57,9 +57,9 @@ export function CourseRatingPanel({
             </p>
           )}
         </div>
-        <div className="rounded-xl bg-secondary/60 px-5 py-3 text-center">
+        <div className="rounded-xl bg-secondary/60 px-4 py-2.5 text-center sm:px-5 sm:py-3">
           <p className="text-xs text-muted-foreground">你选择的分数</p>
-          <p className="text-3xl font-light tracking-tighter tabular-nums">
+          <p className="text-2xl font-light tracking-tighter tabular-nums sm:text-3xl">
             {score.toFixed(1)}
           </p>
         </div>
@@ -112,7 +112,7 @@ export function CourseRatingPanel({
           </div>
 
           {/* Quick picks */}
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
             <span className="text-xs text-muted-foreground">快捷：</span>
             {QUICK_SCORES.map((s) => (
               <button
@@ -121,7 +121,7 @@ export function CourseRatingPanel({
                 disabled={!canSubmit}
                 onClick={() => setScore(s)}
                 className={cn(
-                  "inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs transition-colors",
+                  "inline-flex items-center gap-0.5 sm:gap-1 rounded-full border px-2.5 py-0.5 sm:px-3 sm:py-1 text-xs transition-colors",
                   score === s
                     ? "border-foreground bg-foreground text-background"
                     : "border-border hover:bg-accent",

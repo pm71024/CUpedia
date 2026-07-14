@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ThumbsUpIcon, Trash2Icon } from "lucide-react";
@@ -40,6 +40,32 @@ export function CourseReviewSection({
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
   const [busyId, setBusyId] = useState<string | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Smooth scroll handoff: when the review scroll-box hits its top/bottom
+  // boundary, let the remaining wheel delta pass through to the page so the
+  // user doesn't get "trapped" inside the container.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+
+    function onWheel(e: WheelEvent) {
+      const { scrollTop, scrollHeight, clientHeight } = el!;
+      const atTop = scrollTop <= 0;
+      const atBottom = scrollTop + clientHeight >= scrollHeight - 1;
+
+      // At the boundary in the scroll direction → don't capture; let the
+      // event bubble to the page so the user keeps scrolling naturally.
+      if ((atTop && e.deltaY < 0) || (atBottom && e.deltaY > 0)) {
+        return;
+      }
+      // Otherwise, stop propagation so only the review box scrolls.
+      e.stopPropagation();
+    }
+
+    el.addEventListener("wheel", onWheel, { passive: true });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
 
   function handleSubmit() {
     const trimmed = content.trim();
@@ -123,56 +149,61 @@ export function CourseReviewSection({
         </div>
       )}
 
-      <ul className="space-y-3">
-        {reviews.length === 0 && (
-          <li className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
-            还没有评论，来做第一个分享的人吧。
-          </li>
-        )}
-        {reviews.map((r) => (
-          <li key={r.id} className="rounded-xl border p-4">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium">匿名用户</span>
-              <span className="text-xs text-muted-foreground">
-                {timeAgo(r.createdAt)}
-              </span>
-            </div>
-            <p className="mt-2 text-sm whitespace-pre-wrap">{r.content}</p>
-            <div className="mt-3 flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => isAuthenticated && handleLike(r.id)}
-                disabled={!isAuthenticated || (pending && busyId === r.id)}
-                className={cn(
-                  "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs transition-colors",
-                  r.likedByMe
-                    ? "bg-primary/10 text-primary"
-                    : "bg-secondary text-muted-foreground hover:bg-accent",
-                  !isAuthenticated && "cursor-not-allowed opacity-60",
-                )}
-                title={isAuthenticated ? "点赞" : "登录后可点赞"}
-              >
-                <ThumbsUpIcon
-                  className={cn("h-3.5 w-3.5", r.likedByMe && "fill-current")}
-                />
-                {r.likeCount}
-              </button>
-              {r.isOwn && (
+      <div
+        ref={scrollRef}
+        className="max-h-[450px] overflow-y-auto rounded-xl overscroll-y-auto scroll-smooth"
+      >
+        <ul className="space-y-3">
+          {reviews.length === 0 && (
+            <li className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
+              还没有评论，来做第一个分享的人吧。
+            </li>
+          )}
+          {reviews.map((r) => (
+            <li key={r.id} className="rounded-xl border p-4">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium">匿名用户</span>
+                <span className="text-xs text-muted-foreground">
+                  {timeAgo(r.createdAt)}
+                </span>
+              </div>
+              <p className="mt-2 text-sm whitespace-pre-wrap">{r.content}</p>
+              <div className="mt-3 flex items-center gap-3">
                 <button
                   type="button"
-                  onClick={() => handleDelete(r.id)}
-                  disabled={pending && busyId === r.id}
-                  className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs text-destructive transition-colors hover:bg-destructive/10"
-                  title="撤回我的评论"
+                  onClick={() => isAuthenticated && handleLike(r.id)}
+                  disabled={!isAuthenticated || (pending && busyId === r.id)}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs transition-colors",
+                    r.likedByMe
+                      ? "bg-primary/10 text-primary"
+                      : "bg-secondary text-muted-foreground hover:bg-accent",
+                    !isAuthenticated && "cursor-not-allowed opacity-60",
+                  )}
+                  title={isAuthenticated ? "点赞" : "登录后可点赞"}
                 >
-                  <Trash2Icon className="h-3.5 w-3.5" />
-                  撤回
+                  <ThumbsUpIcon
+                    className={cn("h-3.5 w-3.5", r.likedByMe && "fill-current")}
+                  />
+                  {r.likeCount}
                 </button>
-              )}
-            </div>
-          </li>
-        ))}
-      </ul>
+                {r.isOwn && (
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(r.id)}
+                    disabled={pending && busyId === r.id}
+                    className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs text-destructive transition-colors hover:bg-destructive/10"
+                    title="撤回我的评论"
+                  >
+                    <Trash2Icon className="h-3.5 w-3.5" />
+                    撤回
+                  </button>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      </div>
     </section>
   );
 }

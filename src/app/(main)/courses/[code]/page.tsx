@@ -13,6 +13,7 @@ import { getOptionalUser } from "@/lib/auth-guard";
 import { Badge } from "@/components/ui/badge";
 import { CourseReviewSection } from "@/components/courses/course-review-section";
 import { CourseRatingPanel } from "@/components/courses/course-rating-panel";
+import { CourseDescription } from "@/components/courses/course-description";
 
 export default async function CourseDetailPage({
   params,
@@ -61,11 +62,11 @@ export default async function CourseDetailPage({
                 ))}
               </div>
             </div>
-            <div className="rounded-xl bg-secondary/60 px-6 py-4 text-center">
+            <div className="rounded-xl bg-secondary/60 px-4 py-3 text-center sm:px-6 sm:py-4">
               <p className="text-xs tracking-wider text-muted-foreground uppercase">
                 综合推荐指数
               </p>
-              <p className="mt-1 text-4xl font-light tracking-tighter">
+              <p className="mt-1 text-3xl font-light tracking-tighter sm:text-4xl">
                 {course.rating !== null ? course.rating.toFixed(1) : "—"}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
@@ -78,11 +79,7 @@ export default async function CourseDetailPage({
             </div>
           </div>
 
-          {course.description && (
-            <p className="mt-5 border-t pt-5 text-sm leading-relaxed text-muted-foreground">
-              {course.description}
-            </p>
-          )}
+          <CourseDescription text={course.description} />
         </div>
 
         {ratingState && (
