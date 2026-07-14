@@ -6,6 +6,22 @@ import { selectSeedProfessor } from "./helpers/course-review";
 
 const contents: string[] = [];
 
+async function createReview(email: string, content: string, createdAt: string) {
+  const client = new Client({ connectionString: process.env.DATABASE_URL });
+  await client.connect();
+  try {
+    await client.query(
+      `insert into course_reviews (course_code, user_id, content, created_at)
+       select 'CSCI1130', id, $2, $3
+       from users
+       where email = $1`,
+      [email, content, createdAt],
+    );
+  } finally {
+    await client.end();
+  }
+}
+
 async function cleanup() {
   if (!contents.length) return;
   const client = new Client({ connectionString: process.env.DATABASE_URL });
@@ -68,22 +84,6 @@ async function createRatingOnly(email: string) {
        ) p
        where u.email = $1`,
       [email],
-    );
-  } finally {
-    await client.end();
-  }
-}
-
-async function createReview(email: string, content: string, createdAt: string) {
-  const client = new Client({ connectionString: process.env.DATABASE_URL });
-  await client.connect();
-  try {
-    await client.query(
-      `insert into course_reviews (course_code, user_id, content, created_at)
-       select 'CSCI1130', id, $2, $3
-       from users
-       where email = $1`,
-      [email, content, createdAt],
     );
   } finally {
     await client.end();

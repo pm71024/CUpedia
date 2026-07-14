@@ -151,6 +151,7 @@ export function CourseReviewSection({
     count: reviews.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => 200,
+    measureElement: (element) => element.getBoundingClientRect().height,
   });
 
   const [professorQuery, setProfessorQuery] = useState(
@@ -474,6 +475,8 @@ export function CourseReviewSection({
               return (
                 <li
                   key={review.id}
+                  data-index={virtualItem.index}
+                  ref={virtualizer.measureElement}
                   className="absolute left-0 right-0 top-0 rounded-xl border p-5"
                   style={{ transform: `translateY(${virtualItem.start}px)` }}
                 >
