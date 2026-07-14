@@ -539,7 +539,13 @@ export function CollegePickerForm() {
                 <dt className="shrink-0 font-medium text-foreground">
                   入学面试：
                 </dt>
-                <dd>网上面试/线下面试/拍视频介绍自己（善衡）</dd>
+                <dd>网上面试/线下面试</dd>
+              </div>
+              <div className="flex gap-1.5">
+                <dt className="shrink-0 font-medium text-foreground">
+                  入学视频：
+                </dt>
+                <dd>上传介绍自己的视频</dd>
               </div>
               <div className="flex gap-1.5">
                 <dt className="shrink-0 font-medium text-foreground">
