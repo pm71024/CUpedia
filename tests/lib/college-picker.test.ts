@@ -550,10 +550,10 @@ describe("recommend — 06 小书院精选专属评分", () => {
       q3: "A",
       q4: "A",
     });
-    // q1A: cwc+25, shho+10, mc+10; q2A: shho+10; q3A: mc+10; q4A: cwc+10
-    // cwc = 25+10 = 35; shho = 10+10 = 20; mc = 10+10 = 20
+    // q1A: cwc+25, shho+20, mc+10; q2A: shho+10; q3A: mc+10; q4A: cwc+10
+    // cwc = 25+10 = 35; shho = 20+10 = 30; mc = 10+10 = 20
     expect(spec.cwc).toBe(35);
-    expect(spec.shho).toBe(20);
+    expect(spec.shho).toBe(30);
     expect(spec.mc).toBe(20);
   });
 
@@ -595,11 +595,11 @@ describe("recommend — 06 小书院精选专属评分", () => {
       smallCollegeAnswers: { q1: "A", q2: "A", q3: "A", q4: "A" },
     });
     // 原始分：mc=83, shho=81, cwc=43
-    // 专属：cwc=35, shho=20, mc=20
-    // 最终：mc=83×0.6+20×1=69.8; shho=81×0.6+20×1=68.6; cwc=43×0.6+35×1=60.8
-    // 最高 = mc(69.8) → 第一志愿
-    expect(result[0].id).toBe("mc");
-    expect(result[0].score).toBeCloseTo(69.8, 1);
+    // 专属：cwc=35, shho=30, mc=20
+    // 最终：shho=81×0.6+30×1=78.6; mc=83×0.6+20×1=69.8; cwc=43×0.6+35×1=60.8
+    // 最高 = shho(78.6) → 第一志愿
+    expect(result[0].id).toBe("shho");
+    expect(result[0].score).toBeCloseTo(78.6, 1);
     // 第 8-9 志愿为另外两所小书院
     const last2 = result.slice(7, 9).map((c) => c.id);
     expect(SMALL.has(last2[0])).toBe(true);

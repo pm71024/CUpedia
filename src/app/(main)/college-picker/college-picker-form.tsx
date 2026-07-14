@@ -176,17 +176,23 @@ function CollegeCaptureSummary({ collegeId }: { collegeId: CollegeId }) {
   if (!capture) return null;
 
   return (
-    <div className="space-y-1 pt-1 text-xs">
-      <ul className="flex flex-wrap gap-x-3 gap-y-0.5">
+    <div className="space-y-1.5 pt-1 text-xs">
+      <ul className="flex flex-wrap gap-1.5">
         {capture.pros.map((item) => (
-          <li key={item} className="text-green-600">
+          <li
+            key={item}
+            className="rounded-md bg-emerald-50 px-2 py-0.5 text-neutral-800"
+          >
             {item}
           </li>
         ))}
       </ul>
-      <ul className="flex flex-wrap gap-x-3 gap-y-0.5">
+      <ul className="flex flex-wrap gap-1.5">
         {capture.cons.map((item) => (
-          <li key={item} className="text-red-600">
+          <li
+            key={item}
+            className="rounded-md bg-red-50 px-2 py-0.5 text-neutral-800"
+          >
             {item}
           </li>
         ))}
