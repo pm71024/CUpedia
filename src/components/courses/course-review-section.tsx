@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -123,6 +123,29 @@ export function CourseReviewSection({
   const [submitting, startSubmit] = useTransition();
   const [, startSearch] = useTransition();
   const [busyId, setBusyId] = useState<string | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Smooth scroll handoff: when the review scroll-box hits its top/bottom
+  // boundary, let the remaining wheel delta pass through to the page.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+
+    function onWheel(e: WheelEvent) {
+      const { scrollTop, scrollHeight, clientHeight } = el!;
+      const atTop = scrollTop <= 0;
+      const atBottom = scrollTop + clientHeight >= scrollHeight - 1;
+
+      if ((atTop && e.deltaY < 0) || (atBottom && e.deltaY > 0)) {
+        return;
+      }
+      e.stopPropagation();
+    }
+
+    el.addEventListener("wheel", onWheel, { passive: true });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
+
   const [professorQuery, setProfessorQuery] = useState(
     ratingState.lastProfessor?.name ?? "",
   );
@@ -426,7 +449,11 @@ export function CourseReviewSection({
         </span>
       </div>
 
-      <ul className="space-y-3">
+      <div
+        ref={scrollRef}
+        className="max-h-[450px] overflow-y-auto rounded-xl overscroll-y-auto scroll-smooth"
+      >
+        <ul className="space-y-3">
         {reviews.length === 0 && (
           <li className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
             还没有文字测评。你也可以只提交评分。
@@ -520,6 +547,7 @@ export function CourseReviewSection({
           </li>
         ))}
       </ul>
+      </div>
     </section>
   );
 }
