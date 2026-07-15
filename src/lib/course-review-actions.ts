@@ -1,7 +1,7 @@
 "use server";
 
-import { and, count, desc, eq, ilike, inArray, ne, or, sql } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
+import { and, count, desc, eq, inArray, ne, or, sql } from "drizzle-orm";
+import { revalidatePath, unstable_cache } from "next/cache";
 
 import { db } from "@/db";
 import {
@@ -15,6 +15,10 @@ import {
 } from "@/db/schema";
 import { getOptionalUser, requireAuth } from "@/lib/auth-guard";
 import { COURSE_TERMS, type CourseTerm } from "@/lib/course-review-constants";
+import {
+  buildProfessorSearchIndex,
+  searchProfessorCandidates,
+} from "@/lib/professor-search";
 import type { Course } from "@/app/(main)/courses/course-types";
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -523,36 +527,42 @@ export async function getCourseReviews(
   );
 }
 
+const getCachedProfessorSearchCorpus = unstable_cache(
+  async (courseCode: string) => {
+    const candidates = await db
+      .select({
+        id: professors.id,
+        name: professors.name,
+        courseCode: professorCourses.courseCode,
+      })
+      .from(professors)
+      .leftJoin(
+        professorCourses,
+        and(
+          eq(professors.id, professorCourses.professorId),
+          eq(professorCourses.courseCode, courseCode),
+        ),
+      )
+      .orderBy(professors.name);
+    return {
+      candidates,
+      index: buildProfessorSearchIndex(candidates),
+    };
+  },
+  ["course-review-professor-search"],
+  { revalidate: 300, tags: ["professor-catalog"] },
+);
+
 export async function searchProfessors(
   code: string,
   query: string,
 ): Promise<ProfessorOption[]> {
-  const normalizedQuery = query.trim().toLocaleLowerCase();
-  if (!normalizedQuery) return [];
-  return db
-    .select({
-      id: professors.id,
-      name: professors.name,
-    })
-    .from(professors)
-    .innerJoin(
-      professorCourses,
-      eq(professors.id, professorCourses.professorId),
-    )
-    .where(
-      and(
-        eq(professorCourses.courseCode, normalizeCode(code)),
-        ilike(professors.searchText, `%${normalizedQuery}%`),
-      ),
-    )
-    .orderBy(professors.name)
-    .limit(10)
-    .then((rows) =>
-      rows.map((row) => ({
-        id: row.id,
-        name: row.name,
-      })),
-    );
+  if (!query.trim()) return [];
+  await getOptionalUser();
+  const { candidates, index } = await getCachedProfessorSearchCorpus(
+    normalizeCode(code),
+  );
+  return searchProfessorCandidates(candidates, query, index);
 }
 
 export async function getCourseEnrollmentHistory(
@@ -615,18 +625,9 @@ export async function submitCourseReview(
   const [professor] = await db
     .select({ id: professors.id, name: professors.name })
     .from(professors)
-    .innerJoin(
-      professorCourses,
-      eq(professors.id, professorCourses.professorId),
-    )
-    .where(
-      and(
-        eq(professors.id, submission.professorId),
-        eq(professorCourses.courseCode, course.code),
-      ),
-    )
+    .where(eq(professors.id, submission.professorId))
     .limit(1);
-  if (!professor) throw new Error("请选择教授目录中的任课教授");
+  if (!professor) throw new Error("请选择教授目录中的教授");
 
   const existingReviews = await db
     .select({ id: courseReviews.id })

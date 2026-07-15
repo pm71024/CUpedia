@@ -19,8 +19,10 @@ const {
   dbDelete,
   dbTransaction,
   dbChain,
+  professorSearchCache,
 } = vi.hoisted(() => {
   const queue: unknown[] = [];
+  const searchCache = new Map<string, unknown>();
   const chain: Record<string, unknown> = {};
   const methods = [
     "from",
@@ -50,10 +52,22 @@ const {
     dbDelete: vi.fn(() => chain),
     dbTransaction: vi.fn(),
     dbChain: chain,
+    professorSearchCache: searchCache,
   };
 });
 
-vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+vi.mock("next/cache", () => ({
+  revalidatePath: vi.fn(),
+  unstable_cache:
+    (callback: (...args: unknown[]) => Promise<unknown>) =>
+    async (...args: unknown[]) => {
+      const key = JSON.stringify(args);
+      if (!professorSearchCache.has(key)) {
+        professorSearchCache.set(key, await callback(...args));
+      }
+      return professorSearchCache.get(key);
+    },
+}));
 vi.mock("@/lib/auth-guard", () => ({
   requireAuth: (...a: unknown[]) => mockRequireAuth(...a),
   getOptionalUser: (...a: unknown[]) => mockGetOptionalUser(...a),
@@ -100,6 +114,7 @@ const values = () => dbChain.values as Mock;
 beforeEach(() => {
   vi.clearAllMocks();
   dbQueue.length = 0;
+  professorSearchCache.clear();
   mockRequireAuth.mockResolvedValue({ id: "u1", role: "user" });
   mockGetOptionalUser.mockResolvedValue(null);
   dbTransaction.mockImplementation(
@@ -236,7 +251,7 @@ describe("submitCourseReview", () => {
     expect(dbDelete).toHaveBeenCalledOnce();
   });
 
-  it("拒绝目录外或未任教该课程的教授", async () => {
+  it("拒绝目录外的教授", async () => {
     queueRows([COURSE], []);
     await expect(submitCourseReview("CSCI3150", SUBMISSION)).rejects.toThrow(
       /教授目录/,
@@ -257,6 +272,59 @@ describe("searchProfessors", () => {
     queueRows([{ id: "p1", name: "Professor CHAN" }]);
     await expect(searchProfessors("csci 3150", "chan")).resolves.toEqual([
       { id: "p1", name: "Professor CHAN" },
+    ]);
+  });
+
+  it("同一课程的连续姓名搜索复用教授目录", async () => {
+    queueRows([
+      { id: "p1", name: "Professor CHAN", courseCode: "CSCI3150" },
+      { id: "p2", name: "Professor LEGACY", courseCode: null },
+    ]);
+
+    await expect(searchProfessors("CSCI3150", "chan")).resolves.toEqual([
+      { id: "p1", name: "Professor CHAN" },
+    ]);
+    await expect(searchProfessors("CSCI3150", "legacy")).resolves.toEqual([
+      { id: "p2", name: "Professor LEGACY" },
+    ]);
+    expect(dbSelect).toHaveBeenCalledOnce();
+  });
+
+  it("按姓名返回未关联当前课程的目录教授", async () => {
+    queueRows([
+      { id: "legacy", name: "Professor LEGACY", courseCode: null },
+      { id: "current", name: "Professor CHAN", courseCode: "CSCI3150" },
+    ]);
+    await expect(searchProfessors("CSCI3150", "legacy")).resolves.toEqual([
+      { id: "legacy", name: "Professor LEGACY" },
+    ]);
+  });
+
+  it("姓名匹配相同时优先推荐曾任教当前课程的教授", async () => {
+    queueRows([
+      { id: "global", name: "Professor CHAN", courseCode: null },
+      { id: "course", name: "Professor CHAN", courseCode: "CSCI3150" },
+    ]);
+    await expect(searchProfessors("CSCI3150", "chan")).resolves.toEqual([
+      { id: "course", name: "Professor CHAN" },
+      { id: "global", name: "Professor CHAN" },
+    ]);
+  });
+
+  it("容忍多词姓名的轻微拼写错误且不推荐弱匹配", async () => {
+    queueRows([
+      { id: "target", name: "Professor CHAN Wing Kai", courseCode: null },
+      { id: "other", name: "Professor KAI", courseCode: null },
+    ]);
+    await expect(searchProfessors("CSCI3150", "kai chna")).resolves.toEqual([
+      { id: "target", name: "Professor CHAN Wing Kai" },
+    ]);
+  });
+
+  it("支持中文教授姓名查询", async () => {
+    queueRows([{ id: "seed", name: "测试教授 Chan", courseCode: "CSCI1130" }]);
+    await expect(searchProfessors("CSCI1130", "测试教授")).resolves.toEqual([
+      { id: "seed", name: "测试教授 Chan" },
     ]);
   });
 });
