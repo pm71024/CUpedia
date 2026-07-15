@@ -23,3 +23,23 @@ export async function countCommentsForMenuItem(
     .where(eq(canteenDishComments.menuItemId, menuItemId));
   return result[0]?.value ?? 0;
 }
+
+/** Per-menu-item comment totals for a canteen (menu + ranking labels). */
+export async function countCommentsByMenuItemForCanteen(
+  canteenId: string,
+): Promise<Record<string, number>> {
+  const rows = await db
+    .select({
+      menuItemId: canteenDishComments.menuItemId,
+      value: count(),
+    })
+    .from(canteenDishComments)
+    .innerJoin(
+      canteenMenuItems,
+      eq(canteenDishComments.menuItemId, canteenMenuItems.id),
+    )
+    .where(eq(canteenMenuItems.canteenId, canteenId))
+    .groupBy(canteenDishComments.menuItemId);
+
+  return Object.fromEntries(rows.map((row) => [row.menuItemId, row.value]));
+}
