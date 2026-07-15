@@ -22,6 +22,7 @@ import {
   COLLEGE_CAPTURE,
   MAJOR_GROUPS,
   SCORED_FACTORS,
+  SMALL_COLLEGE_IDS,
   type AvoidFactor,
   type BonusFactor,
   type CollegeId,
@@ -671,7 +672,7 @@ export function CollegePickerForm() {
                   }`}
                 >
                   <CardContent className="flex flex-col gap-2 px-4 sm:flex-row sm:items-start sm:justify-between">
-                    <div className="flex items-start gap-3">
+                    <div className="flex items-start gap-3 min-w-0">
                       <Badge
                         variant={index === 0 ? "default" : "secondary"}
                         className="mt-0.5 shrink-0 tabular-nums"
@@ -702,20 +703,27 @@ export function CollegePickerForm() {
                         <CollegeCaptureSummary collegeId={college.id} />
                       </div>
                     </div>
-                    {college.avoidHits.length > 0 && (
-                      <Badge
-                        variant="destructive"
-                        className="mt-0.5 shrink-0 self-start"
+                    <div className="flex flex-row flex-wrap items-start gap-2 sm:flex-col sm:items-end shrink-0 self-start">
+                      {college.avoidHits.length > 0 && (
+                        <Badge variant="destructive">
+                          已避雷
+                        </Badge>
+                      )}
+                      <span
+                        className="text-sm font-medium tabular-nums text-muted-foreground"
+                        data-testid="picker-score"
                       >
-                        已避雷
-                      </Badge>
-                    )}
-                    <span
-                      className="shrink-0 self-start text-sm font-medium tabular-nums text-muted-foreground"
-                      data-testid="picker-score"
-                    >
-                      推荐指数 {college.score.toFixed(1)}
-                    </span>
+                        推荐指数 {college.score.toFixed(1)}
+                      </span>
+                      {index === 0 &&
+                        SMALL_COLLEGE_IDS.includes(college.id) &&
+                        college.avoidHits.length > 0 && (
+                          <div className="rounded-md border px-3 py-2.5 text-sm flex flex-col items-center justify-center gap-0.5">
+                            <span>又想避雷又想冲小书院？</span>
+                            <span>孩子，你不能既要又要啊！</span>
+                          </div>
+                        )}
+                    </div>
                   </CardContent>
                 </Card>
               </li>
