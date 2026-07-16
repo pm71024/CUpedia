@@ -252,38 +252,22 @@ export function CourseReviewSection({
 
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Smooth scroll handoff: when the review scroll-box hits its top/bottom
-  // boundary, let the remaining wheel delta pass through to the page.
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-
-    function onWheel(e: WheelEvent) {
-      const { scrollTop, scrollHeight, clientHeight } = el!;
-      const atTop = scrollTop <= 0;
-      const atBottom = scrollTop + clientHeight >= scrollHeight - 1;
-
-      if ((atTop && e.deltaY < 0) || (atBottom && e.deltaY > 0)) {
-        return;
-      }
-      e.stopPropagation();
-    }
-
-    el.addEventListener("wheel", onWheel, { passive: true });
-    return () => el.removeEventListener("wheel", onWheel);
-  }, []);
-
   // Jump back to the top of the scroll-box when the professor filter changes.
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: 0 });
   }, [selectedProfessorId]);
 
+  // Wheel handoff at the top/bottom boundary is native behavior
+  // (overscroll-behavior defaults to `auto`), so no JS is needed for it.
   const virtualizer = useVirtualizer({
     count: visibleReviews.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => 200,
     gap: 12,
     measureElement: (element) => element.getBoundingClientRect().height,
+    // Assume the max-h-[450px] viewport during SSR so the first reviews
+    // are part of the initial HTML instead of an empty list.
+    initialRect: { width: 768, height: 450 },
   });
   const professorTermsByYear = selectedProfessor
     ? [
