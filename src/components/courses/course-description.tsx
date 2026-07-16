@@ -18,6 +18,10 @@ export function CourseDescription({ text }: { text: string }) {
   const ref = useRef<HTMLParagraphElement>(null);
 
   useEffect(() => {
+    // While expanded the text is unclamped and can never overflow; keep the
+    // last measured value so the toggle doesn't vanish for a frame on collapse.
+    if (expanded) return;
+
     const el = ref.current;
     if (!el) return;
 
@@ -30,7 +34,7 @@ export function CourseDescription({ text }: { text: string }) {
     check();
 
     return () => observer.disconnect();
-  }, [text]);
+  }, [text, expanded]);
 
   if (!text) return null;
 
