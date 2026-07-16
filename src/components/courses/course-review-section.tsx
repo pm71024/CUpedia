@@ -263,8 +263,10 @@ export function CourseReviewSection({
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Jump back to the top of the scroll-box when the professor filter changes.
+  // Assign scrollTop instead of calling scrollTo(), which jsdom doesn't
+  // implement; both respect the CSS scroll-behavior on the box.
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: 0 });
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
   }, [selectedProfessorId]);
 
   // Wheel handoff at the top/bottom boundary is native behavior
