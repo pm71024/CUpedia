@@ -12,6 +12,7 @@ import { formatCourseCode } from "@/app/(main)/courses/course-types";
 import { getOptionalUser } from "@/lib/auth-guard";
 import { Badge } from "@/components/ui/badge";
 import { CourseReviewSection } from "@/components/courses/course-review-section";
+import { CourseDescription } from "@/components/courses/course-description";
 import { CourseListBackLink } from "@/components/courses/course-list-back-link";
 
 function recentAcademicYears(now = new Date()): string[] {
@@ -99,9 +100,7 @@ export default async function CourseDetailPage({
           </div>
 
           {course.description && (
-            <p className="mt-5 border-t pt-5 text-sm leading-relaxed text-muted-foreground">
-              {course.description}
-            </p>
+            <CourseDescription text={course.description} />
           )}
         </div>
 
