@@ -259,12 +259,13 @@ export function CourseReviewSection({
 
   // Wheel handoff at the top/bottom boundary is native behavior
   // (overscroll-behavior defaults to `auto`), so no JS is needed for it.
+  // Row heights use the library default measureElement: it reads the free
+  // ResizeObserver borderBoxSize instead of forcing a layout pass.
   const virtualizer = useVirtualizer({
     count: visibleReviews.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => 200,
     gap: 12,
-    measureElement: (element) => element.getBoundingClientRect().height,
     // Assume the max-h-[450px] viewport during SSR so the first reviews
     // are part of the initial HTML instead of an empty list.
     initialRect: { width: 768, height: 450 },
@@ -878,7 +879,10 @@ export function CourseReviewSection({
 
       <div
         ref={scrollRef}
-        className="max-h-[450px] overflow-y-auto rounded-xl scroll-smooth"
+        tabIndex={0}
+        role="region"
+        aria-label="同学测评列表"
+        className="max-h-[450px] overflow-y-auto rounded-xl scroll-smooth focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
       >
         {visibleReviews.length === 0 ? (
           <div className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
