@@ -1,18 +1,36 @@
 import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { getDanmakuAuthorForApi } from "@/lib/auth-guard";
-import { insertDanmakuForUser } from "@/lib/danmaku-mutations";
-import { listCurrentMonthDanmaku } from "@/lib/danmaku-queries";
-import { publicDanmakuError, serializePublicDanmaku } from "@/lib/danmaku-api";
+import { insertCanteenDanmakuForUser } from "@/lib/danmaku-mutations";
+import { listCurrentMonthCanteenDanmaku } from "@/lib/danmaku-queries";
+import {
+  isUuid,
+  publicDanmakuError,
+  serializePublicDanmaku,
+} from "@/lib/danmaku-api";
 
-export async function GET() {
-  const messages = await listCurrentMonthDanmaku();
+export async function GET(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id: canteenId } = await params;
+  if (!isUuid(canteenId)) {
+    return NextResponse.json({ error: "INVALID_CANTEEN_ID" }, { status: 400 });
+  }
+  const messages = await listCurrentMonthCanteenDanmaku(canteenId);
   return NextResponse.json({
     messages: messages.map(serializePublicDanmaku),
   });
 }
 
-export async function POST(request: NextRequest) {
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id: canteenId } = await params;
+  if (!isUuid(canteenId)) {
+    return NextResponse.json({ error: "INVALID_CANTEEN_ID" }, { status: 400 });
+  }
   const author = await getDanmakuAuthorForApi();
   if (!author) {
     return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
@@ -33,11 +51,12 @@ export async function POST(request: NextRequest) {
   const body = raw as { content?: unknown };
 
   try {
-    const message = await insertDanmakuForUser(
+    const message = await insertCanteenDanmakuForUser(
       { id: author.id, nickname: author.nickname },
+      canteenId,
       body.content,
     );
-    revalidatePath("/");
+    revalidatePath(`/canteen/${canteenId}`);
     return NextResponse.json(
       {
         message: serializePublicDanmaku(message),
