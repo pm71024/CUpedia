@@ -53,8 +53,9 @@ export function CourseDescription({ text }: { text: string }) {
         {(overflow || expanded) && (
           <button
             type="button"
+            aria-expanded={expanded}
             onClick={() => setExpanded((v) => !v)}
-            className="mt-1.5 inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+            className="mt-1.5 -ml-2 inline-flex min-h-11 min-w-11 items-center justify-center gap-1 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           >
             {expanded ? "收起" : "展开"}
             <ChevronDownIcon
