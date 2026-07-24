@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { Canteen } from "@/lib/canteen-types";
+
+export { CanteenCard } from "@/components/canteen/canteen-card";
 
 export function CanteenShell({
   eyebrow,
@@ -60,7 +61,9 @@ export function CanteenShell({
                 {eyebrow}
               </p>
             ) : (
-              <div className="text-sm text-[var(--canteen-muted)]">{eyebrow}</div>
+              <div className="text-sm text-[var(--canteen-muted)]">
+                {eyebrow}
+              </div>
             )
           ) : null}
           <div className="flex min-w-0 items-center gap-1 sm:block">
@@ -118,63 +121,6 @@ export function CanteenShell({
       </header>
       {children}
     </div>
-  );
-}
-
-export function CanteenCard({
-  canteen,
-  itemCount,
-  href,
-  className,
-}: {
-  canteen: Canteen;
-  itemCount?: number;
-  href: string;
-  className?: string;
-}) {
-  return (
-    <Link
-      href={href}
-      className={cn(
-        "canteen-ledger-row group flex items-center gap-3 px-1 py-2.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--canteen-purple)] sm:gap-6 sm:py-4",
-        className,
-      )}
-    >
-      <span
-        className="h-8 w-0.5 shrink-0 bg-[var(--canteen-purple)] opacity-70 transition-opacity group-hover:opacity-100 sm:h-10"
-        aria-hidden
-      />
-      <div className="min-w-0 flex-1">
-        <h2 className="canteen-display text-base font-semibold text-[var(--canteen-ink)] group-hover:text-[var(--canteen-purple)] sm:text-xl">
-          {canteen.name}
-        </h2>
-        {canteen.location ? (
-          <p className="mt-0.5 text-xs text-[var(--canteen-muted)] sm:mt-1 sm:text-sm">
-            {canteen.location}
-          </p>
-        ) : null}
-      </div>
-      {itemCount !== undefined ? (
-        <p className="shrink-0 font-mono text-xs tabular-nums tracking-wide text-[var(--canteen-muted)] sm:text-sm">
-          {itemCount > 0 ? (
-            <>
-              <span className="text-[var(--canteen-ink)]">
-                {String(itemCount).padStart(2, "0")}
-              </span>{" "}
-              道菜
-            </>
-          ) : (
-            "暂无菜单"
-          )}
-        </p>
-      ) : null}
-      <span
-        className="shrink-0 text-[var(--canteen-muted)] transition-transform group-hover:translate-x-0.5 group-hover:text-[var(--canteen-purple)]"
-        aria-hidden
-      >
-        →
-      </span>
-    </Link>
   );
 }
 

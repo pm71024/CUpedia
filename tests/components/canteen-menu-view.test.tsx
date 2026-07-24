@@ -14,9 +14,18 @@ import type { CanteenMenuItem } from "@/lib/canteen-types";
 import { AFTERNOON_HINT_TEXT } from "@/lib/canteen-meal-period";
 import { hktDate } from "../helpers/hkt-date";
 
-const { mockUpsertDishVote } = vi.hoisted(() => ({
+const { mockUpsertDishVote, mockUseDeferredValue } = vi.hoisted(() => ({
   mockUpsertDishVote: vi.fn(),
+  mockUseDeferredValue: vi.fn((value: unknown) => value),
 }));
+
+vi.mock("react", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react")>();
+  return {
+    ...actual,
+    useDeferredValue: <T,>(value: T) => mockUseDeferredValue(value) as T,
+  };
+});
 
 vi.mock("@/lib/canteen-vote-actions", () => ({
   upsertDishVote: (...args: unknown[]) => mockUpsertDishVote(...args),
@@ -65,6 +74,8 @@ beforeEach(() => {
   setHktClock(12, 0);
   mockUpsertDishVote.mockReset();
   mockUpsertDishVote.mockResolvedValue({ menuItemId: "ln-1", vote: "like" });
+  mockUseDeferredValue.mockReset();
+  mockUseDeferredValue.mockImplementation((value) => value);
   cleanup();
 });
 
@@ -83,7 +94,9 @@ describe("CanteenMenuView", () => {
     expect(screen.queryByText("演示早餐")).toBeNull();
 
     fireEvent.click(screen.getByRole("tab", { name: "早餐" }));
-    expect(screen.getByText("演示早餐")).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByText("演示早餐")).toBeTruthy();
+    });
     expect(screen.queryByText("演示午餐")).toBeNull();
   });
 
@@ -105,6 +118,57 @@ describe("CanteenMenuView", () => {
       expect(screen.getByText("演示晚餐")).toBeTruthy();
     });
     expect(screen.queryByText("演示午餐")).toBeNull();
+  });
+
+  it("settles on the latest period after rapid tab changes", async () => {
+    render(<CanteenMenuView items={ITEMS} voteCounts={{}} myVotes={{}} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("演示午餐")).toBeTruthy();
+    });
+
+    const breakfast = screen.getByRole("tab", { name: "早餐" });
+    const dinner = screen.getByRole("tab", { name: "晚餐" });
+    fireEvent.click(breakfast);
+    expect(breakfast.getAttribute("aria-selected")).toBe("true");
+    fireEvent.click(dinner);
+    expect(dinner.getAttribute("aria-selected")).toBe("true");
+
+    await waitFor(() => {
+      expect(screen.getByText("演示晚餐")).toBeTruthy();
+    });
+    expect(screen.queryByText("演示早餐")).toBeNull();
+    expect(screen.queryByText("演示午餐")).toBeNull();
+  });
+
+  it("makes stale menu content inert while a period switch settles", async () => {
+    let deferSelection = false;
+    let settledSelection: unknown;
+    mockUseDeferredValue.mockImplementation((selection) => {
+      if (!deferSelection) {
+        settledSelection = selection;
+        return selection;
+      }
+      return settledSelection;
+    });
+
+    render(<CanteenMenuView items={ITEMS} voteCounts={{}} myVotes={{}} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("演示午餐")).toBeTruthy();
+    });
+
+    deferSelection = true;
+    fireEvent.click(screen.getByRole("tab", { name: "晚餐" }));
+
+    const staleContent = screen
+      .getByText("演示午餐")
+      .closest('[aria-busy="true"]');
+    expect(staleContent?.hasAttribute("inert")).toBe(true);
+    expect(staleContent?.classList.contains("pointer-events-none")).toBe(true);
+    expect(
+      screen.getByRole("tab", { name: "晚餐" }).getAttribute("aria-selected"),
+    ).toBe("true");
   });
 
   it("shows afternoon hint on lunch tab between 14:30 and 17:29 HKT", async () => {
@@ -135,9 +199,11 @@ describe("CanteenMenuView", () => {
     });
 
     fireEvent.click(screen.getByRole("tab", { name: "大众推荐" }));
-    expect(screen.getByText("演示午餐")).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByText("演示午餐")).toBeTruthy();
+      expect(screen.getByText(/赞 5/)).toBeTruthy();
+    });
     expect(screen.queryByText("演示早餐")).toBeNull();
-    expect(screen.getByText(/赞 5/)).toBeTruthy();
     expect(screen.queryByText(/赞 99/)).toBeNull();
   });
 
@@ -156,10 +222,14 @@ describe("CanteenMenuView", () => {
     });
 
     fireEvent.click(screen.getByRole("tab", { name: "大众推荐" }));
-    expect(screen.getByRole("button", { name: "评论 (4)" })).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "评论 (4)" })).toBeTruthy();
+    });
 
     fireEvent.click(screen.getByRole("tab", { name: "大众避雷" }));
-    expect(screen.getByRole("button", { name: "评论 (4)" })).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "评论 (4)" })).toBeTruthy();
+    });
   });
 
   it("shows empty state when period has no dishes", async () => {
@@ -176,7 +246,9 @@ describe("CanteenMenuView", () => {
     });
 
     fireEvent.click(screen.getByRole("tab", { name: "早餐" }));
-    expect(screen.getByText("该餐段暂无菜品")).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByText("该餐段暂无菜品")).toBeTruthy();
+    });
   });
 
   it("keeps vote state when switching view tabs", async () => {
@@ -194,9 +266,11 @@ describe("CanteenMenuView", () => {
     fireEvent.click(screen.getByRole("tab", { name: "大众推荐" }));
     fireEvent.click(screen.getByRole("tab", { name: "菜单" }));
 
-    expect(screen.getByRole("button", { name: "点赞" }).textContent).toContain(
-      "1",
-    );
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "点赞" }).textContent,
+      ).toContain("1");
+    });
     expect(
       screen.getByRole("button", { name: "点赞" }).getAttribute("aria-pressed"),
     ).toBe("true");
@@ -217,12 +291,55 @@ describe("CanteenMenuView", () => {
     expect(screen.getByRole("heading", { name: /饮品/ })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: /饮品/ }));
-    expect(screen.getByText("奶茶")).toBeTruthy();
-    expect(screen.queryByText("叉烧饭")).toBeNull();
-    expect(screen.queryByText("牛肉面")).toBeNull();
+    await waitFor(() => {
+      expect(screen.getByText("奶茶")).toBeTruthy();
+      expect(screen.queryByText("叉烧饭")).toBeNull();
+      expect(screen.queryByText("牛肉面")).toBeNull();
+    });
+    expect(
+      screen.getByRole("button", { name: /饮品/ }).getAttribute("aria-pressed"),
+    ).toBe("true");
 
     fireEvent.click(screen.getByRole("button", { name: "全部" }));
-    expect(screen.getByText("叉烧饭")).toBeTruthy();
-    expect(screen.getByText("牛肉面")).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByText("叉烧饭")).toBeTruthy();
+      expect(screen.getByText("牛肉面")).toBeTruthy();
+    });
+  });
+
+  it("atomically resets category when periods have different sections", async () => {
+    const mixedPeriods = [
+      item("lunch-rice", "lunch", "午餐饭", "rice"),
+      item("lunch-drink", "lunch", "午餐茶", "drink"),
+      item("breakfast-noodle", "breakfast", "早餐面", "noodle"),
+      item("breakfast-dessert", "breakfast", "早餐包", "dessert"),
+    ];
+    render(
+      <CanteenMenuView items={mixedPeriods} voteCounts={{}} myVotes={{}} />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("午餐饭")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /饮品/ }));
+    await waitFor(() => {
+      expect(screen.getByText("午餐茶")).toBeTruthy();
+      expect(screen.queryByText("午餐饭")).toBeNull();
+    });
+
+    fireEvent.click(screen.getByRole("tab", { name: "早餐" }));
+    expect(
+      screen.getByRole("button", { name: "全部" }).getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(screen.getByRole("button", { name: /粉面/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /甜品/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /饮品/ })).toBeNull();
+
+    await waitFor(() => {
+      expect(screen.getByText("早餐面")).toBeTruthy();
+      expect(screen.getByText("早餐包")).toBeTruthy();
+    });
+    expect(screen.queryByText("该餐段暂无菜品")).toBeNull();
   });
 });
