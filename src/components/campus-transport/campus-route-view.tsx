@@ -23,7 +23,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  computeBusPositions,
+  type BusPosition,
+} from "@/lib/campus-transport/bus-positions";
+import { BUS_DWELL_MILLISECONDS } from "@/lib/campus-transport/bus-kinematics";
+import {
   type CampusBusPassengerRoute,
+  type CampusBusArrival,
   type CampusBusStop,
   type CampusBusStopBoard,
   formatHongKongTime,
@@ -104,7 +110,7 @@ function ArrivalBoard({
   board: CampusBusStopBoard;
   route: CampusBusPassengerRoute;
 }) {
-  if (!board.upcomingArrivals.length) {
+  if (!board.upcomingArrivals.length && !board.dockingArrival) {
     return (
       <p className="px-4 py-5 text-sm text-muted-foreground sm:px-6">
         {getStatusText(board, route)}
@@ -112,40 +118,78 @@ function ArrivalBoard({
     );
   }
 
+  const rows = board.dockingArrival
+    ? [board.dockingArrival, ...board.upcomingArrivals].slice(0, 3)
+    : board.upcomingArrivals;
+  const firstArrival = rows[0]!;
+  const liveText = board.dockingArrival
+    ? "下一班現正停靠本站"
+    : firstArrival.waitMinutes <= 1
+      ? "下一班即將到達"
+      : `下一班預計 ${firstArrival.waitMinutes} 分鐘後到站`;
+
   return (
     <>
       <p className="sr-only" aria-live="polite">
-        下一班預計 {board.upcomingArrivals[0].waitMinutes} 分鐘後到站
+        {liveText}
       </p>
       <div className="divide-y divide-border/80">
-        {board.upcomingArrivals.map((arrival, index) => (
-          <div
-            key={`${arrival.departureAt}-${arrival.patternId}`}
-            className={cn(
-              "grid grid-cols-[4.75rem_1fr_auto] items-baseline gap-2 px-4 sm:grid-cols-[6rem_1fr_auto] sm:px-6",
-              index === 0 ? "bg-muted/25 py-3" : "py-2.5",
-            )}
-          >
-            <span className="text-sm font-semibold text-muted-foreground">
-              {index === 0 ? "下一班" : `第 ${index + 1} 班`}
-            </span>
-            <strong
+        {rows.map((arrival, index) => {
+          const docking = index === 0 && board.dockingArrival !== null;
+          const arrivingSoon = !docking && arrival.waitMinutes <= 1;
+          return (
+            <div
+              key={`${arrival.departureAt}-${arrival.patternId}`}
               className={cn(
-                "tracking-tight text-[#4b1f60] tabular-nums dark:text-[#e7c9f1]",
-                index === 0 ? "text-2xl sm:text-[1.7rem]" : "text-xl",
+                "grid grid-cols-[4.75rem_1fr_auto] items-baseline gap-2 px-4 sm:grid-cols-[6rem_1fr_auto] sm:px-6",
+                index === 0 ? "bg-muted/25 py-3" : "py-2.5",
               )}
             >
-              {arrival.waitMinutes}
-              <small className="ml-1 text-sm font-semibold">分鐘</small>
-            </strong>
-            <time
-              dateTime={new Date(arrival.arrivalAt).toISOString()}
-              className="text-sm text-muted-foreground tabular-nums"
-            >
-              預計 {arrival.arrivalTime}
-            </time>
-          </div>
-        ))}
+              <span className="text-sm font-semibold text-muted-foreground">
+                {index === 0 ? "下一班" : `第 ${index + 1} 班`}
+              </span>
+              {docking ? (
+                <strong
+                  className={cn(
+                    "tracking-tight text-[#D4A538]",
+                    index === 0 ? "text-2xl sm:text-[1.7rem]" : "text-xl",
+                  )}
+                >
+                  停靠
+                </strong>
+              ) : arrivingSoon ? (
+                <strong
+                  className={cn(
+                    "tracking-tight text-[#4b1f60] dark:text-[#e7c9f1]",
+                    index === 0 ? "text-2xl sm:text-[1.7rem]" : "text-xl",
+                  )}
+                >
+                  即將到達
+                </strong>
+              ) : (
+                <strong
+                  className={cn(
+                    "tracking-tight text-[#4b1f60] tabular-nums dark:text-[#e7c9f1]",
+                    index === 0 ? "text-2xl sm:text-[1.7rem]" : "text-xl",
+                  )}
+                >
+                  {arrival.waitMinutes}
+                  <small className="ml-1 text-sm font-semibold">分鐘</small>
+                </strong>
+              )}
+              <time
+                dateTime={new Date(arrival.arrivalAt).toISOString()}
+                className="text-sm text-muted-foreground tabular-nums"
+              >
+                {docking
+                  ? `開出 ${formatHongKongTime(
+                      arrival.arrivalAt + BUS_DWELL_MILLISECONDS,
+                    )}`
+                  : `預計 ${arrival.arrivalTime}`}
+              </time>
+            </div>
+          );
+        })}
       </div>
       {board.skippedDepartureTimes.length > 0 && (
         <p className="border-t border-border/80 px-4 py-3 text-sm text-muted-foreground sm:px-6">
@@ -157,12 +201,14 @@ function ArrivalBoard({
 }
 
 function FeedbackDialog({
+  candidateArrival,
   now,
   onOpenChange,
   open,
   route,
   stop,
 }: {
+  candidateArrival: CampusBusArrival | null;
   now: number;
   onOpenChange: (open: boolean) => void;
   open: boolean;
@@ -182,6 +228,16 @@ function FeedbackDialog({
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
+          candidateContext: candidateArrival
+            ? {
+                patternRevisionId: candidateArrival.patternRevisionId,
+                predictionModelRevisionId:
+                  route.predictionRevisionId ?? route.seedModelRevisionId,
+                scheduledDepartureAt: new Date(
+                  candidateArrival.departureAt,
+                ).toISOString(),
+              }
+            : null,
           observedArrivalAt: new Date(selectedTime).toISOString(),
           routeId: route.routeId,
           stopOccurrenceId: stop.id,
@@ -194,6 +250,9 @@ function FeedbackDialog({
         if (response.status === 429 || error?.error === "RATE_LIMIT_EXCEEDED") {
           throw new Error("RATE_LIMIT_EXCEEDED");
         }
+        if (response.status === 409 || error?.error === "ROUTE_CATALOG_STALE") {
+          throw new Error("ROUTE_CATALOG_STALE");
+        }
         throw new Error("arrival observation rejected");
       }
 
@@ -203,7 +262,9 @@ function FeedbackDialog({
       toast.error(
         error instanceof Error && error.message === "RATE_LIMIT_EXCEEDED"
           ? "提交太頻密，請稍後再試。"
-          : "提交失敗，請稍後再試。",
+          : error instanceof Error && error.message === "ROUTE_CATALOG_STALE"
+            ? "路線資料已更新，請刷新頁面後重新選擇。"
+            : "提交失敗，請稍後再試。",
       );
     } finally {
       setSubmitting(false);
@@ -303,12 +364,12 @@ export function CampusRouteView({
   initialNow: number;
   route: CampusBusPassengerRoute;
 }) {
-  const initialStopId = route.stops.some(
+  const defaultStopId = route.stops.some(
     (stop) => stop.id === route.defaultStopId,
   )
     ? route.defaultStopId
     : route.stops[0]?.id;
-  const [selectedStopId, setSelectedStopId] = useState(initialStopId);
+  const [selectedStopId, setSelectedStopId] = useState(defaultStopId);
   const [nearbyStopId, setNearbyStopId] = useState<string | null>(null);
   const [nearbyCandidateIds, setNearbyCandidateIds] = useState<string[]>([]);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
@@ -316,9 +377,24 @@ export function CampusRouteView({
   const journeyScrollRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 30_000);
-    return () => window.clearInterval(timer);
+    const syncTimer = window.setTimeout(() => setNow(Date.now()), 0);
+    const prefersReducedMotion = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
+    const interval = window.setInterval(
+      () => setNow(Date.now()),
+      prefersReducedMotion ? 30_000 : 1_000,
+    );
+    return () => {
+      window.clearTimeout(syncTimer);
+      window.clearInterval(interval);
+    };
   }, []);
+
+  const busPositions: BusPosition[] = useMemo(
+    () => computeBusPositions(route, now),
+    [now, route],
+  );
 
   const boards = useMemo(
     () =>
@@ -379,14 +455,28 @@ export function CampusRouteView({
   );
 
   useEffect(() => {
-    if (!initialStopId) return;
-    revealStopInJourney(initialStopId, "auto");
-  }, [initialStopId, revealStopInJourney]);
+    if (defaultStopId) revealStopInJourney(defaultStopId, "auto");
+  }, [defaultStopId, revealStopInJourney]);
 
   const selectStopFromMap = useCallback(
     (stopId: string) => selectStop(stopId),
     [selectStop],
   );
+
+  useEffect(() => {
+    const queryTimer = window.setTimeout(() => {
+      const requestedStopId = new URLSearchParams(window.location.search).get(
+        "stop",
+      );
+      if (
+        requestedStopId &&
+        route.stops.some((stop) => stop.id === requestedStopId)
+      ) {
+        selectStop(requestedStopId, "auto");
+      }
+    }, 0);
+    return () => window.clearTimeout(queryTimer);
+  }, [route.stops, selectStop]);
 
   const confirmNearbyStop = useCallback(
     (stopId: string) => {
@@ -464,10 +554,11 @@ export function CampusRouteView({
         </div>
         <div className="flex items-center gap-2 border-b bg-[#fbf9fc] px-4 py-2 text-xs text-muted-foreground sm:px-6">
           <RouteIcon className="size-4 text-[#6f3b86]" aria-hidden="true" />
-          <span>測試預計 · 非實時車輛位置</span>
+          <span>測試預計 · 非實時車輛位置（地圖車輛為推算）</span>
         </div>
 
         <CampusRouteMap
+          busPositions={busPositions}
           route={route}
           stops={route.stops}
           selectedStopId={selectedStop.id}
@@ -604,6 +695,11 @@ export function CampusRouteView({
 
       {feedbackOpen && (
         <FeedbackDialog
+          candidateArrival={
+            boards.get(selectedStop.id)?.dockingArrival ??
+            boards.get(selectedStop.id)?.upcomingArrivals[0] ??
+            null
+          }
           now={now}
           route={route}
           stop={selectedStop}

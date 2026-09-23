@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 
 import { CampusRouteView } from "@/components/campus-transport/campus-route-view";
 import { toCampusBusPassengerRoute } from "@/lib/campus-transport/campus-bus";
@@ -9,7 +9,7 @@ import {
 } from "@/lib/campus-transport/routes-data";
 import { getChampionCampusBusRoute } from "@/lib/campus-transport/prediction-model-cache";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 300;
 
 type RoutePageProps = {
   params: Promise<{ routeId: string }>;
@@ -17,7 +17,7 @@ type RoutePageProps = {
 
 export function generateStaticParams() {
   return campusBusRoutes
-    .filter((route) => route.routeId !== "2")
+    .filter((route) => route.slug !== "2")
     .map((route) => ({ routeId: route.slug }));
 }
 
@@ -36,10 +36,16 @@ export async function generateMetadata({
 
 export default async function CampusRoutePage({ params }: RoutePageProps) {
   const { routeId } = await params;
+  if (routeId.toLowerCase() === "1a") {
+    redirect("/campus-bus/1");
+  }
+  if (routeId.toLowerCase() === "1b") {
+    redirect("/campus-bus?routeRetired=1b");
+  }
   const route = await getChampionCampusBusRoute(routeId);
-  if (!route || route.routeId === "2") notFound();
+  if (!route || route.slug === "2") notFound();
 
-  // This route is force-dynamic and the timestamp seeds a client-side clock.
+  // The client immediately replaces this cached timestamp with the live clock.
   // eslint-disable-next-line react-hooks/purity
   const initialNow = Date.now();
   return (

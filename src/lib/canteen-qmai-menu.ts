@@ -1,0 +1,272 @@
+import { assignMealPeriodSortOrder } from "@/lib/canteen-aigens-parse";
+import { mealPeriodsForOperatingWindow } from "@/lib/canteen-provider-menu-periods";
+import {
+  assertCompatibleProviderIdentityOccurrence,
+  assertProviderMenuIdentityItems,
+} from "./canteen-provider-menu-identity";
+import { expectedMenuSnapshotCompleteness } from "./canteen-menu-snapshot-completeness";
+import { resolveMenuSectionKey } from "@/lib/canteen-svg-keys";
+import type {
+  MealPeriodAssignment,
+  MealPeriod,
+  MenuItemPriceOptionInput,
+  ProviderMenuObservation,
+} from "@/lib/canteen-types";
+import { sortMenuProviderOccurrences } from "@/lib/canteen-types";
+
+type JsonObject = Record<string, unknown>;
+
+function object(value: unknown): JsonObject | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as JsonObject)
+    : null;
+}
+
+function array(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function text(value: unknown): string | null {
+  if (typeof value !== "string" && typeof value !== "number") return null;
+  const normalized = String(value).trim().replace(/\s+/g, " ");
+  return normalized || null;
+}
+
+function amountMinor(value: unknown): number | null {
+  const amount = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(amount) || amount < 0 || amount > 9_999) return null;
+  return Math.round(amount * 100);
+}
+
+function skuLabel(sku: JsonObject): string | null {
+  const parts = array(sku.skuItemList)
+    .map(object)
+    .filter((item): item is JsonObject => item !== null)
+    .map((item) =>
+      text(item.itemName ?? item.name ?? item.valueName ?? item.value),
+    )
+    .filter((value): value is string => value !== null);
+  return parts.length > 0 ? parts.join(" / ") : text(sku.skuName ?? sku.name);
+}
+
+function priceOptions(item: JsonObject): MenuItemPriceOptionInput[] {
+  const options = array(item.skuList)
+    .map(object)
+    .filter((sku): sku is JsonObject => sku !== null)
+    .map((sku, index) => {
+      const amount = amountMinor(sku.salePrice ?? sku.price);
+      if (amount === null) return null;
+      return {
+        label: skuLabel(sku),
+        amountMinor: amount,
+        currency: "HKD",
+        sortOrder: index,
+      };
+    })
+    .filter((option): option is MenuItemPriceOptionInput => option !== null);
+  if (options.length === 1) options[0].label = null;
+  return options;
+}
+
+function operatingWindows(value: unknown): Array<[string, string]> | null {
+  if (value === null || value === undefined) return null;
+  const saleTime = object(value);
+  if (!saleTime) throw new Error("INVALID_QMAI_SALE_TIME");
+  const scheduleValues: unknown[] = [];
+  if (Object.hasOwn(saleTime, "weekTimeList")) {
+    scheduleValues.push(saleTime.weekTimeList);
+  }
+  if (Object.hasOwn(saleTime, "timeList")) {
+    scheduleValues.push(saleTime.timeList);
+  }
+  if (scheduleValues.length === 0) {
+    throw new Error("INVALID_QMAI_SALE_TIME");
+  }
+  for (const scheduleValue of scheduleValues) {
+    if (scheduleValue !== null && !Array.isArray(scheduleValue)) {
+      throw new Error("INVALID_QMAI_SALE_TIME");
+    }
+  }
+  if (scheduleValues.every((scheduleValue) => scheduleValue === null)) {
+    return null;
+  }
+  const candidates = scheduleValues.flatMap(array);
+  if (candidates.length === 0) throw new Error("INVALID_QMAI_SALE_TIME");
+  const windows: Array<[string, string]> = [];
+  for (const candidate of candidates) {
+    const row = object(candidate);
+    if (!row) throw new Error("INVALID_QMAI_SALE_TIME");
+    const nested = array(row.timeList).length > 0 ? array(row.timeList) : [row];
+    for (const nestedValue of nested) {
+      const interval = object(nestedValue);
+      if (!interval) throw new Error("INVALID_QMAI_SALE_TIME");
+      const start = text(
+        interval.timeStart ??
+          interval.startTime ??
+          interval.start ??
+          interval.beginTime,
+      );
+      const end = text(
+        interval.timeEnd ??
+          interval.endTime ??
+          interval.end ??
+          interval.finishTime,
+      );
+      if (!start || !end) throw new Error("INVALID_QMAI_SALE_TIME");
+      windows.push([start.slice(0, 5), end.slice(0, 5)]);
+    }
+  }
+  return windows;
+}
+
+function mealPeriods(
+  item: JsonObject,
+  observedMealPeriod: MealPeriod,
+): MealPeriodAssignment[] {
+  const windows = operatingWindows(item.saleTime);
+  if (!windows) return [observedMealPeriod];
+  const periods = new Set<MealPeriodAssignment>();
+  for (const [start, end] of windows) {
+    const inferredPeriods = mealPeriodsForOperatingWindow(start, end);
+    if (inferredPeriods.includes("allday")) {
+      throw new Error("INVALID_QMAI_SALE_TIME");
+    }
+    inferredPeriods.forEach((period) => periods.add(period));
+  }
+  return [...periods];
+}
+
+function isAvailable(item: JsonObject): boolean {
+  if (Number(item.available ?? 1) === 0) return false;
+  if (Number(item.stockStatus ?? 1) === 0) return false;
+  const inventory = Number(item.totalInventory);
+  return !Number.isFinite(inventory) || inventory > 0;
+}
+
+export function buildQmaiMenuSyncPayload(
+  input: unknown,
+  observedMealPeriod: MealPeriod,
+): ProviderMenuObservation {
+  const root = object(input);
+  const data = object(root?.data);
+  if (
+    Number(root?.code) !== 0 ||
+    root?.status !== true ||
+    !data ||
+    !Array.isArray(data.categoryItems)
+  ) {
+    throw new Error("QMAI_MENU_ERROR");
+  }
+
+  const candidates = new Map<
+    string,
+    ProviderMenuObservation["items"][number]
+  >();
+  let providerOccurrenceOrder = 0;
+  for (const categoryValue of data.categoryItems) {
+    const category = object(categoryValue);
+    if (!category || Number(category.available ?? 1) === 0) continue;
+    const categoryName = text(category.categoryName ?? category.name) ?? "其他";
+    if (!Array.isArray(category.itemList)) throw new Error("INVALID_QMAI_MENU");
+    for (const itemValue of category.itemList) {
+      const item = object(itemValue);
+      const externalProductId = text(item?.goodsId);
+      const name = text(item?.name ?? item?.goodsName);
+      if (!item) continue;
+      if (!isAvailable(item)) continue;
+      assertProviderMenuIdentityItems("qmai", [
+        { externalProductId: externalProductId ?? "" },
+      ]);
+      if (!externalProductId || !name) continue;
+      const options = priceOptions(item);
+      if (options.length === 0) continue;
+      const itemSortOrder = providerOccurrenceOrder++;
+      const periods = mealPeriods(item, observedMealPeriod);
+      const categoryKey = resolveMenuSectionKey({
+        categoryName,
+        dishName: name,
+      });
+      const occurrenceFacts = periods.map((mealPeriod) => ({
+        mealPeriod,
+        categoryKey,
+        sortOrder: itemSortOrder,
+        priceOptions: options,
+      }));
+      const existing = candidates.get(externalProductId);
+      if (existing) {
+        const sameCategoryOccurrences = existing.occurrences?.filter(
+          (occurrence) => occurrence.categoryKey === categoryKey,
+        );
+        if (sameCategoryOccurrences?.length) {
+          assertCompatibleProviderIdentityOccurrence(
+            "qmai",
+            {
+              ...existing,
+              priceOptions: sameCategoryOccurrences[0].priceOptions,
+              mealPeriods: sameCategoryOccurrences.map(
+                (occurrence) => occurrence.mealPeriod,
+              ),
+            },
+            {
+              externalProductId,
+              name,
+              priceOptions: options,
+              mealPeriods: periods,
+              svgKey: categoryKey,
+            },
+          );
+        }
+        if (existing.name !== name) {
+          assertProviderMenuIdentityItems("qmai", [
+            existing,
+            { externalProductId, name },
+          ]);
+        }
+        existing.occurrences?.push(...occurrenceFacts);
+        for (const option of options) {
+          if (
+            !existing.priceOptions.some(
+              (candidate) =>
+                candidate.label === option.label &&
+                candidate.amountMinor === option.amountMinor &&
+                candidate.currency === option.currency,
+            )
+          ) {
+            existing.priceOptions.push(option);
+          }
+        }
+        if (categoryKey.localeCompare(existing.svgKey) < 0) {
+          existing.svgKey = categoryKey;
+        }
+        existing.mealPeriods = [
+          ...new Set([...existing.mealPeriods, ...periods]),
+        ];
+        continue;
+      }
+      candidates.set(externalProductId, {
+        externalProductId,
+        name,
+        priceOptions: options,
+        mealPeriods: periods,
+        sortOrder: 0,
+        svgKey: categoryKey,
+        occurrences: occurrenceFacts,
+      });
+    }
+  }
+  const items = [...candidates.values()];
+  if (items.length === 0) throw new Error("EMPTY_QMAI_MENU");
+  assertProviderMenuIdentityItems("qmai", items);
+  const sortedItems = assignMealPeriodSortOrder(
+    items,
+    (item) => item.mealPeriods,
+  );
+  for (const item of sortedItems) {
+    item.occurrences = sortMenuProviderOccurrences(item.occurrences ?? []);
+  }
+  return {
+    snapshotCompleteness: expectedMenuSnapshotCompleteness("qmai"),
+    observationScope: { kind: "meal-period", mealPeriod: observedMealPeriod },
+    items: sortedItems,
+  };
+}

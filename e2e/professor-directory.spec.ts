@@ -2,8 +2,8 @@ import { Client } from "pg";
 import { expect, test } from "@playwright/test";
 
 import { loginWithPassword } from "./helpers/auth";
+import { expectIdleWithoutPrefetch, trackPrefetch } from "./helpers/prefetch";
 import { expectBottomSheetViewportToStayStill } from "./helpers/mobile-bottom-sheet";
-import { emulateColorScheme } from "./helpers/theme";
 
 const PERSON_ID = "e2e-professor-directory-person";
 const PUBLIC_ID = "7a7ca8c9-1dd2-4b06-8ff9-d55b64d7f7b5";
@@ -257,6 +257,36 @@ test.afterAll(async () => {
   });
 });
 
+for (const width of [1280, 390]) {
+  test(`professor cards avoid speculative requests at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 844 });
+    const paths = trackPrefetch(page);
+    await page.goto("/professors");
+    const card = page
+      .locator(`a[href^="/professors/${PUBLIC_ID}"]`)
+      .filter({ visible: true });
+    await expect(card).toBeVisible();
+    await page
+      .locator(`a[href^="/professors/${SCHOOL_PUBLIC_ID}"]`)
+      .scrollIntoViewIfNeeded();
+    await card.hover();
+    await expectIdleWithoutPrefetch(page, paths);
+    await card.click();
+    await expect(page).toHaveURL(new RegExp(`/professors/${PUBLIC_ID}`));
+    await expect(
+      page.getByRole("heading", { name: RENDERED_PROFESSOR_NAME }),
+    ).toBeVisible();
+    await page.goBack();
+    await expect(card).toBeVisible();
+    paths.length = 0;
+    await page.reload();
+    await expect(card).toBeVisible();
+    await expectIdleWithoutPrefetch(page, paths);
+  });
+}
+
 test("ignores a stale department filter instead of showing an empty directory", async ({
   page,
 }) => {
@@ -264,9 +294,9 @@ test("ignores a stale department filter instead of showing an empty directory", 
     "/professors?q=%20%20&department=department-that-no-longer-exists",
   );
 
-  await expect(page.getByRole("heading", { name: RENDERED_PROFESSOR_NAME })).toHaveCount(
-    2,
-  );
+  await expect(
+    page.getByRole("heading", { name: RENDERED_PROFESSOR_NAME }),
+  ).toHaveCount(2);
   await expect(page.getByText(/全部 \d+ 位教授/)).toBeVisible();
   await expect(page.getByRole("link", { name: "清除筛选" })).toHaveCount(0);
   await expect(
@@ -328,9 +358,9 @@ test("finds aliases without duplicating a professor with multiple affiliations",
   await expect(page).toHaveURL(new RegExp(`department=${MULTI_DEPARTMENT_ID}`));
 
   await expect(page.getByText("找到 1 位教授")).toBeVisible();
-  await expect(page.getByRole("heading", { name: RENDERED_PROFESSOR_NAME })).toHaveCount(
-    1,
-  );
+  await expect(
+    page.getByRole("heading", { name: RENDERED_PROFESSOR_NAME }),
+  ).toHaveCount(1);
   await professorSearch.fill("測試陳");
   await expect(aliasMatch).toHaveCount(1);
 });
@@ -469,7 +499,7 @@ test("mobile professor search matches course search without triggering iOS focus
 
 test("searches a professor, opens the card, and binds a course review", async ({
   page,
-}, testInfo) => {
+}) => {
   test.setTimeout(90_000);
   await loginWithPassword(page, "contributor@test.com", "password123");
   await page.goto("/courses");
@@ -487,26 +517,6 @@ test("searches a professor, opens the card, and binds a course review", async ({
   await expect(
     page.getByRole("heading", { name: RENDERED_PROFESSOR_NAME }),
   ).toBeVisible();
-  await page.screenshot({
-    path: testInfo.outputPath("professor-directory.png"),
-    fullPage: true,
-    caret: "initial",
-  });
-  await page.setViewportSize({ width: 375, height: 812 });
-  await page.screenshot({
-    path: testInfo.outputPath("professor-directory-mobile.png"),
-    fullPage: true,
-    caret: "initial",
-  });
-  await page.setViewportSize({ width: 1280, height: 720 });
-  await emulateColorScheme(page, "dark");
-  await page.screenshot({
-    path: testInfo.outputPath("professor-directory-dark.png"),
-    fullPage: true,
-    caret: "initial",
-  });
-  await emulateColorScheme(page, "light");
-
   await page.getByRole("combobox", { name: "搜索教授" }).fill("CHAN Tai");
   await expect(
     page.getByRole("option", { name: RENDERED_PROFESSOR_NAME }),
@@ -533,27 +543,6 @@ test("searches a professor, opens the card, and binds a course review", async ({
   await expect(page).toHaveURL(/chooseCourse=1/);
   await page.keyboard.press("Escape");
   await expect(page).not.toHaveURL(/chooseCourse=1/);
-  await page.screenshot({
-    path: testInfo.outputPath("professor-detail.png"),
-    fullPage: true,
-    caret: "initial",
-  });
-
-  await page.setViewportSize({ width: 375, height: 812 });
-  await page.screenshot({
-    path: testInfo.outputPath("professor-detail-mobile.png"),
-    fullPage: true,
-    caret: "initial",
-  });
-  await page.setViewportSize({ width: 1280, height: 720 });
-  await emulateColorScheme(page, "dark");
-  await page.screenshot({
-    path: testInfo.outputPath("professor-detail-dark.png"),
-    fullPage: true,
-    caret: "initial",
-  });
-  await emulateColorScheme(page, "light");
-
   await page.getByRole("button", { name: /查看全部 \d+ 门并搜索课程/ }).click();
   await page
     .getByRole("searchbox", { name: "搜索课程代码或名称" })

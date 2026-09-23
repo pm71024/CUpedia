@@ -38,7 +38,6 @@ import { cn } from "@/lib/utils";
 import { isFocusedWikiEditorRoute } from "@/lib/wiki-routes";
 import { getWikiDisplayTitle } from "@/lib/wiki-title";
 import { useSidebar } from "@/components/layout/sidebar-provider";
-import { PrefetchLink } from "@/components/layout/prefetch-link";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -47,7 +46,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { WikiCreateButton } from "@/components/wiki/wiki-create-button";
 import { useOptionalWikiTree } from "@/components/wiki/wiki-tree-provider";
-import { reorderWikiPage, type WikiPageMove } from "@/lib/wiki-actions";
+import { reorderWikiPage } from "@/lib/wiki-actions";
+import type { WikiPageMove } from "@/lib/wiki-tree-state";
 
 type TreeNode = {
   id: string;
@@ -264,6 +264,7 @@ function PageTreeItem({
     draggedPage: Pick<TreeNode, "id" | "parentId">;
     placement: "before" | "after";
   } | null>(null);
+  const dropTargetRef = useRef(dropTarget);
   const dropPlacement =
     dropTarget?.draggedPage === draggedPage ? dropTarget.placement : null;
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -393,18 +394,21 @@ function PageTreeItem({
           event.stopPropagation();
           event.dataTransfer.dropEffect = "move";
           const bounds = event.currentTarget.getBoundingClientRect();
-          setDropTarget({
+          const nextDropTarget = {
             draggedPage,
             placement:
               event.clientY < bounds.top + bounds.height / 2
                 ? "before"
                 : "after",
-          });
+          } as const;
+          dropTargetRef.current = nextDropTarget;
+          setDropTarget(nextDropTarget);
         }}
         onDragLeave={(event) => {
           if (
             !event.currentTarget.contains(event.relatedTarget as Node | null)
           ) {
+            dropTargetRef.current = null;
             setDropTarget(null);
           }
         }}
@@ -419,13 +423,17 @@ function PageTreeItem({
           event.preventDefault();
           event.stopPropagation();
           const bounds = event.currentTarget.getBoundingClientRect();
+          const latestDropTarget = dropTargetRef.current;
           movePage(draggedPage.id, {
             targetPageId: node.id,
             placement:
-              event.clientY < bounds.top + bounds.height / 2
-                ? "before"
-                : "after",
+              latestDropTarget?.draggedPage.id === draggedPage.id
+                ? latestDropTarget.placement
+                : event.clientY < bounds.top + bounds.height / 2
+                  ? "before"
+                  : "after",
           });
+          dropTargetRef.current = null;
           setDropTarget(null);
         }}
         onPointerDown={startLongPress}
@@ -502,8 +510,9 @@ function PageTreeItem({
             <PageIcon icon={node.icon} />
           </span>
         )}
-        <PrefetchLink
+        <Link
           href={href}
+          prefetch={false}
           onClick={(event) => {
             if (suppressNextClickRef.current) {
               event.preventDefault();
@@ -552,7 +561,7 @@ function PageTreeItem({
               className="ml-2 size-3.5 shrink-0 animate-spin text-muted-foreground motion-reduce:animate-none"
             />
           )}
-        </PrefetchLink>
+        </Link>
         <div
           data-testid="wiki-tree-row-actions"
           className="pointer-events-none absolute right-1 hidden items-center gap-0.5 opacity-0 transition-opacity group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100 group-hover/row:pointer-events-auto group-hover/row:opacity-100 md:flex"
@@ -572,6 +581,7 @@ function PageTreeItem({
               }}
               onDragEnd={() => {
                 setDraggedPage(null);
+                dropTargetRef.current = null;
                 setDropTarget(null);
               }}
               className="flex size-5 cursor-grab items-center justify-center rounded text-[#787774] hover:bg-black/[0.06] hover:text-[#37352f] active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
@@ -1130,12 +1140,15 @@ export function WikiSidebar({
 
   const movePage = useCallback(
     (pageId: string, move: WikiPageMove) => {
+      const mutationToken = wikiTree?.projectReorder(pageId, move) ?? null;
       startMoveTransition(async () => {
         try {
           await reorderWikiPage(pageId, move);
+          wikiTree?.confirm(mutationToken);
           router.refresh();
           setReorderAnnouncement("页面顺序已更新");
         } catch {
+          wikiTree?.rollback(mutationToken);
           toast.error("调整页面顺序失败，请重试");
           setReorderAnnouncement("页面顺序更新失败");
         } finally {
@@ -1143,7 +1156,7 @@ export function WikiSidebar({
         }
       });
     },
-    [router],
+    [router, wikiTree],
   );
 
   const reorderContextValue = useMemo<WikiTreeReorderContextValue>(
@@ -1160,7 +1173,6 @@ export function WikiSidebar({
     (event, href) => {
       if (
         event.defaultPrevented ||
-        !isMobile ||
         event.button !== 0 ||
         event.metaKey ||
         event.ctrlKey ||
@@ -1173,15 +1185,19 @@ export function WikiSidebar({
       event.preventDefault();
       if (pendingHrefRef.current) return;
       if (href === pathname) {
-        closeMobile();
+        if (isMobile) closeMobile();
         return;
       }
 
       pendingHrefRef.current = href;
       setPendingHref(href);
-      feedbackTimerRef.current = setTimeout(() => {
+      if (isMobile) {
+        feedbackTimerRef.current = setTimeout(() => {
+          setFeedbackHref(href);
+        }, NAVIGATION_FEEDBACK_DELAY_MS);
+      } else {
         setFeedbackHref(href);
-      }, NAVIGATION_FEEDBACK_DELAY_MS);
+      }
 
       startTransition(() => router.push(href));
     },
@@ -1214,12 +1230,13 @@ export function WikiSidebar({
       </p>
       {state === "expanded" && (
         <nav
+          data-wiki-sidebar-expanded=""
           aria-label="Wiki 页面树"
           className={cn(
             "sticky hidden w-[var(--sidebar-width)] shrink-0 flex-col overflow-y-auto border-r bg-[#f9f8f7] md:flex",
             focusedEditor
               ? "top-0 h-dvh"
-              : "top-[var(--navbar-height)] h-[calc(100dvh-var(--navbar-height))] md:top-14",
+              : "top-[var(--navbar-height)] h-[calc(100dvh-var(--navbar-height))]",
           )}
           style={{ borderColor: "var(--sidebar-border-color)" }}
         >

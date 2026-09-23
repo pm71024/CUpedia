@@ -1,6 +1,11 @@
 import { notFound } from "next/navigation";
 import { eq } from "drizzle-orm";
-import { getCanteenById, getCanteenMenuItems } from "@/lib/canteen-actions";
+import {
+  getCanteenById,
+  getCanteenMenuFreshness,
+  getCanteenMenuItems,
+  getCanteenOrderingHandoff,
+} from "@/lib/canteen-actions";
 import {
   getMenuItemVoteCounts,
   getMyVotesForCanteen,
@@ -8,11 +13,10 @@ import {
 import { getCommentCountsForCanteen } from "@/lib/canteen-comment-actions";
 import { getOptionalUser, getSessionVoterUser } from "@/lib/auth-guard";
 import { CanteenShell } from "@/components/canteen/canteen-shell";
-import { CanteenQrAction } from "@/components/canteen/canteen-qr-badge";
+import { CanteenOrderAction } from "@/components/canteen/canteen-order-action";
 import { CanteenMenuView } from "@/components/canteen/canteen-menu-view";
 import { DanmakuBanner } from "@/components/home/danmaku-banner";
 import { isCanteenMockMode } from "@/lib/canteen-mock";
-import { resolveCanteenQrSrc } from "@/lib/canteen-assets";
 import { listCanteenDanmaku } from "@/lib/danmaku-actions";
 import { db } from "@/db";
 import { users } from "@/db/schema";
@@ -83,6 +87,8 @@ export default async function CanteenMenuPage({
     sessionUser,
     danmaku,
     danmakuViewer,
+    orderingHandoff,
+    freshness,
   ] = await Promise.all([
     getCanteenMenuItems(id),
     getMenuItemVoteCounts(id).catch(softEmpty({})),
@@ -106,12 +112,14 @@ export default async function CanteenMenuPage({
           throw error;
         }),
     mock ? Promise.resolve({ kind: "guest" as const }) : getDanmakuViewer(),
+    getCanteenOrderingHandoff(id).catch(softEmpty(null)),
+    getCanteenMenuFreshness(id).catch(softEmpty(null)),
   ]);
   const currentUserId =
     sessionUser && !sessionUser.banned ? sessionUser.id : null;
   const commentBlocked = sessionUser?.banned ? ("banned" as const) : null;
   const danmakuFly = shuffleArray(messagesForFlyover(danmaku));
-  const qrSrc = resolveCanteenQrSrc(id, canteen.name);
+  const orderUrl = orderingHandoff?.url ?? null;
   const displayedVoteCounts = mock
     ? { ...voteCounts, ...MOCK_VOTE_COUNTS }
     : voteCounts;
@@ -124,7 +132,7 @@ export default async function CanteenMenuPage({
       subtitle={canteen.location ?? undefined}
       announcement={canteen.announcement}
       className="canteen-detail-page"
-      action={<CanteenQrAction src={qrSrc} canteenName={canteen.name} />}
+      action={<CanteenOrderAction href={orderUrl} canteenName={canteen.name} />}
       topContent={
         <DanmakuBanner
           initialMessages={danmaku}
@@ -138,6 +146,7 @@ export default async function CanteenMenuPage({
     >
       <CanteenMenuView
         items={items}
+        freshness={freshness}
         voteCounts={displayedVoteCounts}
         myVotes={myVotes}
         commentCounts={commentCounts}

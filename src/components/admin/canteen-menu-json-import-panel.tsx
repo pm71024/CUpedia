@@ -11,11 +11,11 @@ import type { MenuSyncPlan } from "@/lib/canteen-menu-sync";
 import { cn } from "@/lib/utils";
 
 const SAMPLE_JSON = `{
-  "source": "aigens:102830",
+  "snapshotCompleteness": "complete",
   "takeOverLegacyItems": false,
   "items": [
     {
-      "externalKey": "product-42:lunch",
+      "externalProductId": "product-42",
       "name": "演示饮品",
       "pricing": {
         "options": [
@@ -35,12 +35,14 @@ function jsonImportErrorMessage(code: string): string {
   if (code === "INVALID_MENU_JSON")
     return 'JSON 须为菜品数组，或 { "items": [...] }。';
   if (code === "INVALID_MENU_SYNC") return "同步 JSON 须为对象。";
-  if (code === "INVALID_SYNC_SOURCE") return "source 须为有效的来源标识。";
-  if (code === "INVALID_EXTERNAL_KEY") return "每道菜须有有效的 externalKey。";
-  if (code === "DUPLICATE_EXTERNAL_KEY")
-    return "同一份菜单中 externalKey 不可重复。";
+  if (code === "INVALID_EXTERNAL_PRODUCT_ID")
+    return "每道菜须有有效的 externalProductId。";
+  if (code === "DUPLICATE_EXTERNAL_PRODUCT_ID")
+    return "同一份菜单中 externalProductId 不可重复。";
   if (code === "INVALID_TAKEOVER_FLAG")
     return "takeOverLegacyItems 须为 true 或 false。";
+  if (code === "INVALID_MENU_SNAPSHOT_COMPLETENESS")
+    return 'snapshotCompleteness 须明确填写为 "complete" 或 "partial"。';
   if (code === "MENU_SYNC_CONFLICT")
     return "同步存在匹配冲突，请先处理冲突后再应用。";
   if (code === "MENU_SYNC_STALE") return "菜单已发生变化，请重新预览后再应用。";
@@ -151,7 +153,9 @@ export function CanteenMenuJsonImportPanel({
           外部菜单同步
         </h3>
         <p className="mt-1 text-xs text-[var(--canteen-muted)]">
-          粘贴完整来源快照，先预览差异，再应用同步。缺失菜品会停止供应，但不会删除历史。
+          粘贴来源快照并明确标记 complete 或
+          partial，先预览差异，再应用同步。只有 complete
+          快照中的缺失菜品会停止供应，历史不会删除。
         </p>
       </div>
 
@@ -254,8 +258,11 @@ function MenuSyncPlanSummary({ plan }: { plan: MenuSyncPlan }) {
       {plan.conflicts.length > 0 ? (
         <ul className="space-y-1 text-red-600" aria-label="同步冲突">
           {plan.conflicts.map((conflict) => (
-            <li key={conflict.externalKey}>
-              {conflict.name}：旧菜匹配不唯一或已被其他商品占用
+            <li key={conflict.externalProductId}>
+              {conflict.name}：
+              {conflict.reason === "LEGACY_MATCH_REQUIRES_TAKEOVER"
+                ? "发现同名旧菜；如需保留原 UUID，请启用首次接管后重新预览"
+                : "旧菜匹配不唯一或已被其他商品占用"}
             </li>
           ))}
         </ul>
@@ -266,7 +273,7 @@ function MenuSyncPlanSummary({ plan }: { plan: MenuSyncPlan }) {
           aria-label="同步变更"
         >
           {plan.actions.map((action) => (
-            <li key={`${action.action}-${action.externalKey}`}>
+            <li key={`${action.action}-${action.externalProductId}`}>
               {labels[action.action]}：{action.name}
             </li>
           ))}

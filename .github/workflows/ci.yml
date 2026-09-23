@@ -11,62 +11,251 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  lint-and-test:
+  quality:
+    # Keep the legacy required context until CI gate has been observed and
+    # added to branch protection. The migration then removes this requirement.
+    name: lint-and-test
     runs-on: ubuntu-latest
+    outputs:
+      plan: ${{ steps.plan.outputs.plan }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Classify changes
+        id: plan
+        env:
+          CI_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          CI_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: >-
+          node scripts/ci-classifier.mjs
+          ${{ github.event_name == 'push' && '--force-full' || '' }}
+
+      - name: Check changed-file whitespace
+        if: ${{ github.event_name == 'pull_request' }}
+        run: git diff --check "$CI_BASE_SHA" "$CI_HEAD_SHA" --
+        env:
+          CI_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          CI_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
 
       - uses: pnpm/action-setup@v4
+        if: ${{ fromJSON(steps.plan.outputs.plan).install }}
         with:
           version: 10
 
       - uses: actions/setup-node@v4
+        if: ${{ fromJSON(steps.plan.outputs.plan).install }}
         with:
           node-version: 20
           cache: pnpm
 
+      - uses: supabase/setup-cli@v2
+        if: ${{ fromJSON(steps.plan.outputs.plan).postgres }}
+        with:
+          version: 2.115.0
+
       - run: pnpm install --frozen-lockfile
+        if: ${{ fromJSON(steps.plan.outputs.plan).install }}
 
       - run: pnpm lint
         name: Lint
+        if: ${{ fromJSON(steps.plan.outputs.plan).quality }}
 
       - run: pnpm test
-        name: Test
-
-  typecheck:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
+        name: Unit tests
+        if: ${{ fromJSON(steps.plan.outputs.plan).quality }}
 
       - run: pnpm typecheck
         name: Typecheck
+        if: ${{ fromJSON(steps.plan.outputs.plan).typecheck }}
+
+      - name: Start PostgreSQL integration services
+        if: ${{ fromJSON(steps.plan.outputs.plan).postgres }}
+        run: |
+          docker run -d --name migration-postgres \
+            -e POSTGRES_USER=postgres \
+            -e POSTGRES_PASSWORD=postgres \
+            -e POSTGRES_DB=cuclaw_migration_test \
+            -p 5432:5432 postgres:16
+          docker run -d --name zhparser-postgres \
+            -e POSTGRES_USER=postgres \
+            -e POSTGRES_PASSWORD=postgres \
+            -e POSTGRES_DB=cuclaw_menu_sync_test \
+            -p 5434:5432 abcfy2/zhparser:17-alpine
+          docker run -d --name scheduler-postgres \
+            --add-host=host.docker.internal:host-gateway \
+            -e POSTGRES_PASSWORD=postgres \
+            -e POSTGRES_DB=postgres \
+            -p 5435:5432 supabase/postgres:17.6.1.136
+          for port in 5432 5434 5435; do
+            for attempt in {1..30}; do
+              pg_isready -h localhost -p "$port" -U postgres && break
+              if [ "$attempt" = 30 ]; then exit 1; fi
+              sleep 1
+            done
+          done
+
+      - name: Test legacy migration and preflight compatibility
+        if: ${{ fromJSON(steps.plan.outputs.plan).postgres }}
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/cuclaw_migration_test
+          MIGRATION_COMPATIBILITY_TEST: "1"
+          MENU_IDENTITY_PREFLIGHT_TEST: "1"
+        run: >-
+          pnpm exec vitest run
+          tests/db/canteen-menu-source-migration.test.ts
+          tests/db/canteen-menu-identity-preflight.test.ts
+
+      - name: Initialize zhparser
+        if: ${{ fromJSON(steps.plan.outputs.plan).postgres }}
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5434/cuclaw_menu_sync_test
+        run: psql "$DATABASE_URL" -f init-zhparser.sql
+
+      - name: Initialize Supabase client roles
+        if: ${{ fromJSON(steps.plan.outputs.plan).postgres }}
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5434/cuclaw_menu_sync_test
+        run: >-
+          psql "$DATABASE_URL"
+          -c 'CREATE ROLE anon NOLOGIN'
+          -c 'CREATE ROLE authenticated NOLOGIN'
+
+      - name: Test Campus Map V2 migration compatibility
+        if: ${{ fromJSON(steps.plan.outputs.plan).postgres }}
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5434/cuclaw_menu_sync_test
+          MIGRATION_COMPATIBILITY_TEST: "1"
+        run: >-
+          pnpm exec vitest run
+          tests/db/campus-map-fact-v2-migration.test.ts
+
+      - name: Apply migrations
+        if: ${{ fromJSON(steps.plan.outputs.plan).postgres }}
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5434/cuclaw_menu_sync_test
+        run: pnpm drizzle-kit migrate
+
+      - name: Test Campus Map persistence
+        if: ${{ fromJSON(steps.plan.outputs.plan).postgres }}
+        env:
+          AUTH_SECRET: ci-campus-map-persistence-auth-secret-at-least-32-characters
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5434/cuclaw_menu_sync_test
+        run: >-
+          pnpm exec vitest run
+          --no-file-parallelism
+          tests/db/campus-map-fact-store-append.test.ts
+          tests/db/campus-map-place-feedback.test.ts
+          tests/db/campus-map-place-photo.test.ts
+          tests/db/campus-map-publish.test.ts
+
+      - name: Apply Supabase scheduler migrations
+        if: ${{ fromJSON(steps.plan.outputs.plan).postgres }}
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5435/postgres
+        run: |
+          psql "$DATABASE_URL" \
+            -v ON_ERROR_STOP=1 \
+            -f tests/db/fixtures/supabase-scheduler-bootstrap.sql
+          pnpm drizzle-kit migrate
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          DO $assert_no_scheduler_outbound$
+          BEGIN
+            IF EXISTS (SELECT 1 FROM net.http_request_queue)
+              OR EXISTS (
+                SELECT 1 FROM canteen_menu_scheduler.delivery_audit
+              ) THEN
+              RAISE EXCEPTION 'SCHEDULER_MIGRATION_CREATED_OUTBOUND_WORK';
+            END IF;
+          END
+          $assert_no_scheduler_outbound$;
+          SQL
+
+      - name: Test public Data API security
+        if: ${{ fromJSON(steps.plan.outputs.plan).postgres }}
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5434/cuclaw_menu_sync_test
+          REQUIRE_SUPABASE_CLIENT_ROLES: "1"
+        run: pnpm exec vitest run tests/db/public-data-api-security.test.ts
+
+      - name: Test menu sync persistence
+        if: ${{ fromJSON(steps.plan.outputs.plan).postgres }}
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5434/cuclaw_menu_sync_test
+        run: >-
+          pnpm exec vitest run
+          --no-file-parallelism
+          tests/db/canteen-menu-sync.test.ts
+          tests/db/canteen-menu-source-sync.test.ts
+          tests/db/canteen-menu-sync-scheduler.test.ts
+          tests/db/canteen-menu-sync-snapshots.test.ts
+          tests/db/canteen-menu-sync-health.test.ts
+
+      - name: Test Supabase menu scheduler
+        if: ${{ fromJSON(steps.plan.outputs.plan).postgres }}
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5435/postgres
+          SUPABASE_SCHEDULER_TEST: "1"
+          SCHEDULER_HTTP_DOUBLE_HOST: host.docker.internal
+        run: >-
+          pnpm exec vitest run
+          tests/db/canteen-menu-sync-cron.test.ts
+
+      - name: Check Supabase scheduler database advisors
+        if: ${{ fromJSON(steps.plan.outputs.plan).postgres }}
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5435/postgres
+          PGSSLMODE: disable
+        run: |
+          set -o pipefail
+          supabase db advisors \
+            --db-url "$DATABASE_URL" \
+            --type all \
+            --level warn \
+            --fail-on none \
+            --output-format json \
+            | tee "$RUNNER_TEMP/supabase-scheduler-advisors.json"
+          jq -e '.results | all(.[];
+            (.name == "function_search_path_mutable" and
+             .metadata.name == "prevent_campus_bus_arrival_observation_mutation") or
+            (.name == "extension_in_public" and .metadata.name == "pg_trgm")
+          )' "$RUNNER_TEMP/supabase-scheduler-advisors.json"
 
   build:
+    name: build
     runs-on: ubuntu-latest
+    outputs:
+      plan: ${{ steps.plan.outputs.plan }}
+      e2e_matrix: ${{ steps.plan.outputs.e2e_matrix }}
+      webkit_specs: ${{ steps.plan.outputs.webkit_specs }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Classify changes
+        id: plan
+        env:
+          CI_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          CI_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: >-
+          node scripts/ci-classifier.mjs
+          ${{ github.event_name == 'push' && '--force-full' || '' }}
 
       - uses: pnpm/action-setup@v4
+        if: ${{ fromJSON(steps.plan.outputs.plan).build }}
         with:
           version: 10
 
       - uses: actions/setup-node@v4
+        if: ${{ fromJSON(steps.plan.outputs.plan).build }}
         with:
           node-version: 20
           cache: pnpm
 
       - name: Restore Next build cache
+        if: ${{ fromJSON(steps.plan.outputs.plan).build }}
         uses: actions/cache@v4
         with:
           path: .next/cache
@@ -75,22 +264,29 @@ jobs:
             ${{ runner.os }}-nextjs-${{ hashFiles('pnpm-lock.yaml') }}-
 
       - run: pnpm install --frozen-lockfile
+        if: ${{ fromJSON(steps.plan.outputs.plan).build }}
 
       - run: pnpm build
         name: Build
+        if: ${{ fromJSON(steps.plan.outputs.plan).build }}
         env:
           DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
           AUTH_SECRET: ci-placeholder-secret
           AUTH_URL: http://localhost:3000
+          MINIO_BUCKET: cuclaw-uploads
+          MINIO_PRIVATE_BUCKET: cuclaw-private-uploads
           NEXT_BUILD_SKIP_TYPECHECK: "1"
 
       - run: pnpm bundle:check
         name: Check client bundle budgets
+        if: ${{ fromJSON(steps.plan.outputs.plan).build }}
 
       - name: Package Next build
+        if: ${{ fromJSON(steps.plan.outputs.plan).build }}
         run: tar -czf next-build.tar.gz --exclude=.next/cache .next
 
       - name: Upload Next build
+        if: ${{ fromJSON(steps.plan.outputs.plan).build }}
         uses: actions/upload-artifact@v4
         with:
           name: next-build
@@ -99,43 +295,27 @@ jobs:
           compression-level: 0
           retention-days: 1
 
-  # Non-blocking gate (not in branch-protection required checks yet): runs the
-  # Playwright suite against the same zhparser Postgres the dev stack uses, so
-  # cross-spec regressions (e.g. the #90 H1 break) surface on every PR. Promote
-  # to required once it proves stable.
+  # Full runs retain the measured Chromium lanes. Ordinary runtime changes get
+  # one capability-selected lane independent of those elapsed-time shards.
   e2e:
     runs-on: ubuntu-latest
     needs: build
+    if: ${{ fromJSON(needs.build.outputs.plan).chromium }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - project: chromium-general
-            browser: chromium
-            install_args: --only-shell
-          - project: campus-bus
-            browser: chromium
-            install_args: --only-shell
-          - project: chromium-wiki
-            browser: chromium
-            install_args: --only-shell
-          - project: chromium-wiki-editor
-            browser: chromium
-            install_args: --only-shell
-          - project: webkit-mobile
-            browser: webkit
-            install_args: --with-deps --only-shell
+      matrix: ${{ fromJSON(needs.build.outputs.e2e_matrix) }}
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5433/cuclaw
       AUTH_SECRET: ci-placeholder-secret
       AUTH_URL: http://localhost:3100
-      E2E_CI_GROUPS: "1"
+      E2E_CI_GROUPS: ${{ matrix.ci_groups }}
       MINIO_ENDPOINT: localhost
       MINIO_PORT: "9000"
       MINIO_REGION: us-east-1
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
       MINIO_BUCKET: cuclaw-uploads
+      MINIO_PRIVATE_BUCKET: cuclaw-private-uploads
       MINIO_PUBLIC_URL: http://localhost:9000/cuclaw-uploads
     steps:
       - uses: actions/checkout@v4
@@ -159,20 +339,27 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Start Postgres and MinIO
-        run: docker compose up -d --wait db minio
+      - name: Start PostgreSQL
+        run: docker compose up -d --wait db
+
+      - name: Start MinIO
+        if: ${{ matrix.minio }}
+        run: docker compose up -d --wait minio
 
       - name: Create uploads bucket
+        if: ${{ matrix.minio }}
         run: docker compose run --rm createbuckets
-
-      # global-setup provisions the isolated `cuclaw_e2e` db (create + zhparser
-      # + migrate + seed), so no separate migrate step is needed here.
 
       - name: Install Playwright browser
         run: pnpm exec playwright install ${{ matrix.install_args }} ${{ matrix.browser }}
 
       - name: Run e2e
-        run: pnpm test:e2e --project=${{ matrix.project }}
+        env:
+          E2E_SHARD_COUNT: ${{ matrix.shards }}
+          E2E_SPECS: ${{ matrix.specs }}
+        run: >-
+          node --import tsx scripts/run-e2e-shards.ts
+          --project=${{ matrix.project }} $E2E_SPECS
 
       - name: Upload Playwright artifacts
         if: failure()
@@ -180,6 +367,97 @@ jobs:
         with:
           name: playwright-report-${{ matrix.project }}
           path: |
-            playwright-report/
-            test-results/
+            playwright-report-shard-*/
+            test-results-shard-*/
           retention-days: 7
+
+  browser-third:
+    runs-on: ubuntu-latest
+    needs: build
+    if: ${{ fromJSON(needs.build.outputs.plan).tier == 'full' || fromJSON(needs.build.outputs.plan).webkit }}
+    container: mcr.microsoft.com/playwright:v1.60.0-noble
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/cuclaw
+      E2E_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/cuclaw_e2e
+      AUTH_SECRET: ci-placeholder-secret
+      AUTH_URL: http://localhost:3100
+      E2E_CI_GROUPS: "1"
+      MINIO_BUCKET: ci-public-placeholder
+      MINIO_PRIVATE_BUCKET: ci-private-placeholder
+    services:
+      postgres:
+        image: abcfy2/zhparser:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: cuclaw
+        options: >-
+          --health-cmd "pg_isready -U postgres -d cuclaw"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Download Next build
+        uses: actions/download-artifact@v4
+        with:
+          name: next-build
+
+      - name: Extract Next build
+        run: tar -xzf next-build.tar.gz
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Trust container checkout
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Run balanced Chromium and WebKit risk coverage
+        if: ${{ fromJSON(needs.build.outputs.plan).tier == 'full' }}
+        env:
+          E2E_SHARD_COUNT: "1"
+        run: >-
+          node --import tsx scripts/run-e2e-shards.ts
+          --project=chromium-balanced
+          --project=webkit-mobile
+
+      - name: Run selective WebKit risk coverage
+        if: ${{ fromJSON(needs.build.outputs.plan).tier != 'full' }}
+        env:
+          E2E_SHARD_COUNT: "1"
+          E2E_WEBKIT_SPECS: ${{ needs.build.outputs.webkit_specs }}
+        run: >-
+          node --import tsx scripts/run-e2e-shards.ts
+          --project=webkit-mobile $E2E_WEBKIT_SPECS
+
+      - name: Upload browser artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-browser-third
+          path: |
+            playwright-report-shard-*/
+            test-results-shard-*/
+          retention-days: 7
+
+  gate:
+    name: CI gate
+    runs-on: ubuntu-latest
+    if: ${{ always() }}
+    needs: [quality, build, e2e, browser-third]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Evaluate required capabilities
+        env:
+          QUALITY_PLAN: ${{ needs.quality.outputs.plan }}
+          BUILD_PLAN: ${{ needs.build.outputs.plan }}
+          QUALITY_RESULT: ${{ needs.quality.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          E2E_RESULT: ${{ needs.e2e.result }}
+          BROWSER_THIRD_RESULT: ${{ needs.browser-third.result }}
+        run: node scripts/ci-gate.mjs

@@ -3,25 +3,23 @@ import {
   assignMealPeriodSortOrder,
   parseAigensMenuProducts,
 } from "../src/lib/canteen-aigens-parse";
-import type { MealPeriodAssignment } from "../src/lib/canteen-types";
+import type {
+  MealPeriodAssignment,
+  MenuItemPriceOptionInput,
+} from "../src/lib/canteen-types";
 
 const STORE_ID = "112891";
 const ENDPOINT = `https://aigensstoreapp.appspot.com/api/v1/menu/store/${STORE_ID}.json?locale=default&open=true&menu=prekiosk&groupId=1000&country=hk`;
 const EXCLUDED_CATEGORIES = new Set(["零食", "外賣包裝"]);
 
 type MenuRow = {
-  externalKey: string;
+  externalProductId: string;
   name: string;
-  mealPeriod: MealPeriodAssignment;
+  mealPeriods: MealPeriodAssignment[];
   sortOrder: number;
   svgKey: string;
   pricing: {
-    options: Array<{
-      label: null;
-      amountMinor: number;
-      currency: "HKD";
-      sortOrder: number;
-    }>;
+    options: MenuItemPriceOptionInput[];
   };
 };
 
@@ -42,7 +40,6 @@ async function loadAigensMenu(): Promise<unknown> {
 }
 
 export function buildCucafeMenu(input: unknown): {
-  source: string;
   takeOverLegacyItems: true;
   items: MenuRow[];
 } {
@@ -52,27 +49,19 @@ export function buildCucafeMenu(input: unknown): {
 
   const items = assignMealPeriodSortOrder(
     products.map((product) => ({
-      externalKey: `${product.backendId}:${product.periods[0]}`,
+      externalProductId: product.backendId,
       name: product.name,
-      mealPeriod: product.periods[0]!,
+      mealPeriods: product.periods,
       sortOrder: 0,
       svgKey: product.svgKey,
       pricing: {
-        options: [
-          {
-            label: null,
-            amountMinor: product.amountMinor,
-            currency: "HKD" as const,
-            sortOrder: 0,
-          },
-        ],
+        options: product.priceOptions,
       },
     })),
-    (item) => [item.mealPeriod],
+    (item) => item.mealPeriods,
   );
 
   return {
-    source: `aigens:${STORE_ID}`,
     takeOverLegacyItems: true,
     items,
   };

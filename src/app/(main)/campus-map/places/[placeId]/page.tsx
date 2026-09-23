@@ -1,0 +1,106 @@
+import { notFound } from "next/navigation";
+
+import { CampusMapPlaceDetail } from "@/components/campus-map/place-detail";
+import { getAuthenticatedUserForApi } from "@/lib/auth-guard";
+import {
+  campusMapBuildingDisplayFor,
+  projectCampusMapBuildingDisplay,
+} from "@/lib/campus-map/building-display";
+import {
+  getCampusMapPlaceHistory,
+  getCampusMapPlaceRevision,
+  listCampusMapBrowseBuildings,
+} from "@/lib/campus-map/fact-store";
+import {
+  getCampusMapPlaceFeedbackPage,
+  getCampusMapViewerPlaceFeedback,
+} from "@/lib/campus-map/place-feedback";
+import { getCampusMapRevisionPhotoViews } from "@/lib/campus-map/place-photos";
+import {
+  encodeCampusMapPlaceHref,
+  safeCampusMapListReturnPath,
+} from "@/lib/campus-map/scene-codec";
+
+export const dynamic = "force-dynamic";
+
+export default async function CampusMapPlacePage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ placeId: string }>;
+  searchParams?: Promise<{
+    from?: string | string[];
+    reviewsAfter?: string | string[];
+  }>;
+}) {
+  const { placeId } = await params;
+  const { from, reviewsAfter: rawReviewsAfter } = (await searchParams) ?? {};
+  const reviewsAfter =
+    typeof rawReviewsAfter === "string" ? rawReviewsAfter : undefined;
+  const mapListReturnPath = safeCampusMapListReturnPath(from);
+  const history = await getCampusMapPlaceHistory(placeId, { limit: 1 });
+  const head = history.head;
+  if (!head) notFound();
+  const [current, buildings, viewer, feedback, photosByRevision] =
+    await Promise.all([
+      getCampusMapPlaceRevision(placeId, head.revisionId),
+      listCampusMapBrowseBuildings(),
+      getAuthenticatedUserForApi(),
+      getCampusMapPlaceFeedbackPage(placeId, {
+        cursor: reviewsAfter,
+        limit: 10,
+      }),
+      getCampusMapRevisionPhotoViews([head.revisionId]),
+    ]);
+  const viewerFeedback = viewer
+    ? await getCampusMapViewerPlaceFeedback(placeId, viewer.id)
+    : null;
+  const canonicalFact =
+    current?.content.visibility === "public" ? current.content.fact : null;
+  const buildingRecord = canonicalFact?.buildingId
+    ? buildings.find((item) => item.buildingId === canonicalFact.buildingId)
+    : null;
+  const floorRecord =
+    canonicalFact?.floorId && buildingRecord
+      ? buildingRecord.floors.find(
+          (item) => item.floorId === canonicalFact.floorId,
+        )
+      : null;
+  const buildingDisplay = projectCampusMapBuildingDisplay(buildings);
+  const buildingName = buildingRecord
+    ? (campusMapBuildingDisplayFor(buildingDisplay, buildingRecord.buildingId)
+        ?.label ?? buildingRecord.name)
+    : null;
+
+  return (
+    <CampusMapPlaceDetail
+      placeId={placeId}
+      head={head}
+      fact={canonicalFact}
+      retirementReason={
+        head.status === "retired" && current?.operation === "retire"
+          ? current.comment
+          : null
+      }
+      mapHref={mapListReturnPath ?? encodeCampusMapPlaceHref(placeId, head)}
+      building={
+        buildingRecord
+          ? {
+              name: buildingName ?? buildingRecord.name,
+              floorLabel: floorRecord?.displayLabel ?? null,
+            }
+          : null
+      }
+      isAdmin={viewer?.role === "admin"}
+      feedback={feedback}
+      viewerFeedback={viewerFeedback}
+      viewerCanWrite={Boolean(viewer)}
+      reviewsAfter={reviewsAfter ?? null}
+      photos={
+        canonicalFact && head.status === "active"
+          ? (photosByRevision[head.revisionId] ?? [])
+          : []
+      }
+    />
+  );
+}

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { getTableColumns } from "drizzle-orm";
-import { getTableConfig } from "drizzle-orm/pg-core";
+import { getTableConfig, PgDialect } from "drizzle-orm/pg-core";
+import * as schema from "@/db/schema";
 import {
   users,
   wikiDrafts,
@@ -9,6 +10,11 @@ import {
   sessions,
   wikiLinks,
   canteens,
+  canteenMenuSources,
+  canteenMenuSyncRuns,
+  canteenMenuSyncSnapshots,
+  canteenMenuSyncSnapshotItems,
+  canteenOrderingHandoffs,
   canteenMenuItems,
   canteenMenuItemPrices,
   canteenDishVotes,
@@ -24,10 +30,33 @@ import {
   courseReviews,
   courseReviewReplies,
   announcements,
+  productUpdates,
   notifications,
 } from "@/db/schema";
+import {
+  PRODUCT_UPDATE_AREAS,
+  PRODUCT_UPDATE_TYPES,
+} from "@/lib/product-update-types";
 
 describe("schema", () => {
+  it("enables RLS on every Drizzle-managed application table", () => {
+    const tableConfigs = Object.values(schema).flatMap((value) => {
+      try {
+        return [getTableConfig(value as Parameters<typeof getTableConfig>[0])];
+      } catch {
+        return [];
+      }
+    });
+
+    expect(tableConfigs.length).toBeGreaterThan(0);
+    expect(
+      tableConfigs
+        .filter((table) => !table.enableRLS)
+        .map((table) => table.name)
+        .sort(),
+    ).toEqual([]);
+  });
+
   it("users table has required custom fields", () => {
     const cols = getTableColumns(users);
     expect(cols.nickname).toBeDefined();
@@ -98,10 +127,94 @@ describe("schema", () => {
     expect(cols.mealPeriods).toBeDefined();
     expect(cols.sortOrder).toBeDefined();
     expect(cols.svgKey).toBeDefined();
+    expect(cols.menuSourceId).toBeDefined();
+    expect(cols.externalProductId).toBeDefined();
     expect(cols.externalSource).toBeDefined();
     expect(cols.externalKey).toBeDefined();
     expect(cols.isAvailable).toBeDefined();
     expect(cols.lastSyncedAt).toBeDefined();
+  });
+
+  it("canteenMenuSources stores provider configuration and sync state", () => {
+    const cols = getTableColumns(canteenMenuSources);
+    const config = getTableConfig(canteenMenuSources);
+    expect(cols.canteenId).toBeDefined();
+    expect(cols.provider).toBeDefined();
+    expect(cols.externalOwnerId).toBeDefined();
+    expect(cols.externalStoreId).toBeDefined();
+    expect(cols.config).toBeDefined();
+    expect(cols.closedWeekdays).toBeDefined();
+    expect(cols.syncMealPeriods).toBeDefined();
+    expect(cols.enabled).toBeDefined();
+    expect(cols.lastAttemptId).toBeDefined();
+    expect(cols.lastAttemptAt).toBeDefined();
+    expect(cols.syncClaimToken).toBeDefined();
+    expect(cols.syncClaimExpiresAt).toBeDefined();
+    expect(cols.lastSuccessAt).toBeDefined();
+    expect(cols.lastSnapshotHash).toBeDefined();
+    expect(cols.lastError).toBeDefined();
+    expect(cols.legacyTakeoverAt).toBeDefined();
+    expect(config.checks.map((constraint) => constraint.name)).toContain(
+      "canteen_menu_sources_closed_weekdays_chk",
+    );
+    expect(config.checks.map((constraint) => constraint.name)).toContain(
+      "canteen_menu_sources_sync_meal_periods_chk",
+    );
+  });
+
+  it("canteenMenuSyncRuns stores bounded sync observations", () => {
+    const cols = getTableColumns(canteenMenuSyncRuns);
+    expect(cols.menuSourceId).toBeDefined();
+    expect(cols.status).toBeDefined();
+    expect(cols.snapshotHash).toBeDefined();
+    expect(cols.itemCount).toBeDefined();
+    expect(cols.observation).toBeDefined();
+    expect(cols.errorCode).toBeDefined();
+  });
+
+  it("canteen menu sync snapshots preserve normalized run evidence", () => {
+    const snapshots = getTableColumns(canteenMenuSyncSnapshots);
+    expect(snapshots.runId).toBeDefined();
+    expect(snapshots.menuSourceId).toBeDefined();
+    expect(snapshots.snapshotHash).toBeDefined();
+    expect(snapshots.snapshotCompleteness).toBeDefined();
+    expect(snapshots.observationScope).toBeDefined();
+    expect(snapshots.syncWindowKey).toBeDefined();
+    expect(snapshots.hktWeekday).toBeDefined();
+    expect(snapshots.observedMinuteOfDay).toBeDefined();
+    expect(snapshots.scopeEvidence).toBeDefined();
+    expect(snapshots.observedAt).toBeDefined();
+    const snapshotIndexes = getTableConfig(
+      canteenMenuSyncSnapshots,
+    ).indexes.map((index) => index.config.name);
+    expect(snapshotIndexes).toContain(
+      "canteen_menu_sync_snapshots_retention_idx",
+    );
+    expect(snapshotIndexes).toContain(
+      "canteen_menu_sync_snapshots_scoped_latest_idx",
+    );
+    expect(
+      getTableConfig(canteenMenuSyncRuns).indexes.map(
+        (index) => index.config.name,
+      ),
+    ).toContain("canteen_menu_sync_runs_retention_idx");
+
+    const items = getTableColumns(canteenMenuSyncSnapshotItems);
+    expect(items.runId).toBeDefined();
+    expect(items.externalProductId).toBeDefined();
+    expect(items.name).toBeDefined();
+    expect(items.priceOptions).toBeDefined();
+    expect(items.mealPeriods).toBeDefined();
+    expect(items.sortOrder).toBeDefined();
+    expect(items.svgKey).toBeDefined();
+  });
+
+  it("canteenOrderingHandoffs stores stable official ordering URLs", () => {
+    const cols = getTableColumns(canteenOrderingHandoffs);
+    expect(cols.canteenId).toBeDefined();
+    expect(cols.provider).toBeDefined();
+    expect(cols.url).toBeDefined();
+    expect(cols.enabled).toBeDefined();
   });
 
   it("canteenMenuItemPrices stores labelled minor-unit prices", () => {
@@ -242,5 +355,33 @@ describe("schema", () => {
     expect(cols.notificationSentAt).toBeDefined();
     expect(cols.createdBy).toBeDefined();
     expect(cols.updatedBy).toBeDefined();
+  });
+
+  it("product updates keep controlled classification and permanent publication identity", () => {
+    const cols = getTableColumns(productUpdates);
+    const config = getTableConfig(productUpdates);
+    expect(cols.title).toBeDefined();
+    expect(cols.summary).toBeDefined();
+    expect(cols.content).toBeDefined();
+    expect(cols.type).toBeDefined();
+    expect(cols.areas).toBeDefined();
+    expect(cols.publishedAt.notNull).toBe(true);
+    expect(cols.createdBy).toBeDefined();
+    expect(config.checks.map((constraint) => constraint.name)).toEqual(
+      expect.arrayContaining([
+        "product_updates_type_check",
+        "product_updates_areas_nonempty_check",
+        "product_updates_areas_allowed_check",
+      ]),
+    );
+    const checkSql = config.checks.map(
+      (constraint) => new PgDialect().sqlToQuery(constraint.value).sql,
+    );
+    for (const type of PRODUCT_UPDATE_TYPES) {
+      expect(checkSql.some((query) => query.includes(`'${type}'`))).toBe(true);
+    }
+    for (const area of PRODUCT_UPDATE_AREAS) {
+      expect(checkSql.some((query) => query.includes(`'${area}'`))).toBe(true);
+    }
   });
 });

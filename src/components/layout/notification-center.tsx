@@ -33,9 +33,16 @@ function timeAgo(iso: string): string {
   return new Date(iso).toLocaleDateString("zh-CN");
 }
 
-export function NotificationCenter() {
+export function NotificationCenter({
+  open: controlledOpen,
+  onOpenChange,
+}: {
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+} = {}) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen ?? internalOpen;
   const [unreadCount, setUnreadCount] = useState<number | null>(null);
   const [notifications, setNotifications] = useState<NotificationView[]>([]);
   const [hasMore, setHasMore] = useState(false);
@@ -83,7 +90,8 @@ export function NotificationCenter() {
   }, []);
 
   function handleOpenChange(nextOpen: boolean) {
-    setOpen(nextOpen);
+    if (controlledOpen === undefined) setInternalOpen(nextOpen);
+    onOpenChange?.(nextOpen);
     if (nextOpen) {
       void refreshCount();
       void load(0, false);
@@ -105,7 +113,8 @@ export function NotificationCenter() {
           current === null ? null : Math.max(0, current - 1),
         );
       }
-      setOpen(false);
+      if (controlledOpen === undefined) setInternalOpen(false);
+      onOpenChange?.(false);
       router.push(notification.href);
     } catch {
       setError("无法打开通知，请重试");
@@ -215,7 +224,7 @@ export function NotificationCenter() {
                     onClick={() => openNotification(notification)}
                     className="flex w-full touch-manipulation items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:outline-none disabled:opacity-50"
                   >
-                    {notification.kind === "course_review_reply" ? (
+                    {notification.kind !== "announcement_published" ? (
                       <Avatar size="sm" className="mt-0.5">
                         {notification.actorAvatarUrl && (
                           <AvatarImage
@@ -239,15 +248,10 @@ export function NotificationCenter() {
                           !notification.read && "font-semibold",
                         )}
                       >
-                        {notification.kind === "course_review_reply" ? (
-                          <>
-                            <span className="break-words">
-                              {notification.actorNickname}
-                            </span>{" "}
-                            回复了你在 {notification.courseCode} 的评论
-                          </>
-                        ) : (
+                        {notification.kind === "announcement_published" ? (
                           <>新公告：{notification.title}</>
+                        ) : (
+                          notification.message
                         )}
                       </span>
                       <span className="mt-1 block text-xs text-muted-foreground">

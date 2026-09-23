@@ -1,0 +1,251 @@
+"use client";
+
+import { StarIcon } from "lucide-react";
+import Link from "next/link";
+import { useState } from "react";
+
+import { PlaceFeedbackForm } from "@/components/campus-map/place-feedback-form";
+import { PlaceFeedbackModerationControls } from "@/components/campus-map/place-feedback-moderation-controls";
+import type {
+  CampusMapPlaceFeedbackPage,
+  CampusMapPlaceFeedbackView,
+} from "@/lib/campus-map/place-feedback";
+
+function feedbackDate(value: string) {
+  return new Intl.DateTimeFormat("zh-HK", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    timeZone: "Asia/Hong_Kong",
+  }).format(new Date(value));
+}
+
+function placeFeedbackHref({
+  placeId,
+  reviewsAfter,
+  mapListReturnPath,
+}: {
+  placeId: string;
+  reviewsAfter?: string;
+  mapListReturnPath: string | null;
+}) {
+  const params = new URLSearchParams();
+  if (reviewsAfter) params.set("reviewsAfter", reviewsAfter);
+  if (mapListReturnPath) params.set("from", mapListReturnPath);
+  const search = params.size ? `?${params.toString()}` : "";
+  return `/campus-map/places/${placeId}${search}#place-feedback`;
+}
+
+export function PlaceFeedbackSection({
+  placeId,
+  feedback,
+  viewerFeedback,
+  viewerCanWrite,
+  isAdmin,
+  reviewsAfter,
+  mapListReturnPath = null,
+}: {
+  placeId: string;
+  feedback: CampusMapPlaceFeedbackPage;
+  viewerFeedback: CampusMapPlaceFeedbackView | null;
+  viewerCanWrite: boolean;
+  isAdmin: boolean;
+  reviewsAfter: string | null;
+  mapListReturnPath?: string | null;
+}) {
+  const [localSnapshot, setLocalSnapshot] = useState<{
+    base: CampusMapPlaceFeedbackPage;
+    current: CampusMapPlaceFeedbackPage;
+  } | null>(null);
+  const [sectionMessage, setSectionMessage] = useState<string | null>(null);
+  const [formExpanded, setFormExpanded] = useState(Boolean(viewerFeedback));
+  const [viewerFeedbackOverride, setViewerFeedbackOverride] = useState<{
+    base: CampusMapPlaceFeedbackView | null;
+    current: CampusMapPlaceFeedbackView | null;
+  } | null>(null);
+  const snapshot =
+    localSnapshot?.base === feedback ? localSnapshot.current : feedback;
+  const currentViewerFeedback =
+    viewerFeedbackOverride?.base === viewerFeedback
+      ? viewerFeedbackOverride.current
+      : viewerFeedback;
+  const applySnapshot = (nextSnapshot: CampusMapPlaceFeedbackPage) =>
+    setLocalSnapshot({ base: feedback, current: nextSnapshot });
+
+  const summary = snapshot.summary;
+  const readOnly = snapshot.placeStatus !== "active";
+  return (
+    <section
+      id="place-feedback"
+      className="scroll-mt-6 rounded-2xl border bg-card p-5 shadow-sm sm:p-6"
+      aria-labelledby="place-feedback-title"
+    >
+      <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
+        <h2 id="place-feedback-title" className="text-lg font-semibold">
+          清洁度评价
+        </h2>
+        {summary.averageRating === null ? (
+          <p className="text-sm font-semibold text-muted-foreground">
+            暂无清洁度评分
+          </p>
+        ) : (
+          <p
+            className="inline-flex items-center gap-2 text-sm"
+            aria-label={`平均清洁度 ${summary.averageRating.toFixed(1)} 分，共 ${summary.ratingCount} 个评分、${summary.reviewCount} 条文字评价`}
+          >
+            <StarIcon
+              aria-hidden="true"
+              className="size-5 fill-amber-500 text-amber-600"
+            />
+            <strong className="text-xl">
+              {summary.averageRating.toFixed(1)}
+            </strong>
+            <span className="text-muted-foreground">
+              {summary.ratingCount} 个评分 · {summary.reviewCount} 条评价
+            </span>
+          </p>
+        )}
+      </div>
+
+      <div className="mt-5">
+        {viewerCanWrite || readOnly ? (
+          readOnly || formExpanded || currentViewerFeedback ? (
+            <div id="place-feedback-form">
+              <PlaceFeedbackForm
+                key={`${placeId}:${viewerFeedback?.id ?? "new"}:${viewerFeedback?.version ?? 0}:${viewerFeedback?.visibility ?? "none"}:${readOnly ? "read-only" : "write"}`}
+                placeId={placeId}
+                initialFeedback={viewerFeedback}
+                readOnly={readOnly}
+                reviewsAfter={reviewsAfter}
+                hiddenFeedbackId={
+                  currentViewerFeedback?.visibility === "hidden"
+                    ? currentViewerFeedback.id
+                    : null
+                }
+                onViewerFeedbackChange={(nextFeedback) =>
+                  setViewerFeedbackOverride({
+                    base: viewerFeedback,
+                    current: nextFeedback,
+                  })
+                }
+                onSnapshot={(nextSnapshot) => {
+                  applySnapshot(nextSnapshot);
+                  setSectionMessage(null);
+                }}
+              />
+            </div>
+          ) : (
+            <button
+              type="button"
+              aria-expanded={formExpanded}
+              aria-controls="place-feedback-form"
+              className="inline-flex min-h-11 touch-manipulation items-center rounded-xl bg-emerald-800 px-4 text-sm font-semibold text-white hover:bg-emerald-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700 focus-visible:ring-offset-2"
+              onClick={() => setFormExpanded(true)}
+            >
+              评价清洁度
+            </button>
+          )
+        ) : (
+          <p className="rounded-xl bg-muted px-4 py-3 text-sm text-muted-foreground">
+            <Link
+              href={`/login?callbackUrl=${encodeURIComponent(
+                placeFeedbackHref({ placeId, mapListReturnPath }),
+              )}`}
+              className="font-semibold text-foreground underline underline-offset-4"
+            >
+              登录后评价清洁度
+            </Link>
+          </p>
+        )}
+      </div>
+
+      <div className="mt-7">
+        <h3 className="font-semibold">大家的评价</h3>
+        {snapshot.page.items.length > 0 ? (
+          <ol className="mt-3 grid gap-3">
+            {snapshot.page.items.map((item) => (
+              <li
+                key={item.id}
+                className="rounded-2xl border bg-background p-4"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <strong className="text-sm">{item.author.nickname}</strong>
+                    <p className="mt-1 inline-flex items-center gap-1 text-sm font-semibold text-amber-800 dark:text-amber-300">
+                      <StarIcon
+                        aria-hidden="true"
+                        className="size-4 fill-current"
+                      />
+                      {item.rating} 星
+                    </p>
+                  </div>
+                  <time
+                    dateTime={item.updatedAt}
+                    className="text-xs text-muted-foreground"
+                  >
+                    {feedbackDate(item.updatedAt)}
+                    {item.updatedAt !== item.createdAt ? " 更新" : ""}
+                  </time>
+                </div>
+                <p className="mt-3 whitespace-pre-wrap break-words text-sm leading-6">
+                  {item.content}
+                </p>
+                <PlaceFeedbackModerationControls
+                  placeId={placeId}
+                  feedbackId={item.id}
+                  isAdmin={isAdmin}
+                  reviewsAfter={reviewsAfter}
+                  onSnapshot={(nextSnapshot) => {
+                    applySnapshot(nextSnapshot);
+                    if (currentViewerFeedback?.id === item.id) {
+                      setViewerFeedbackOverride({
+                        base: viewerFeedback,
+                        current: {
+                          ...currentViewerFeedback,
+                          visibility: "hidden",
+                        },
+                      });
+                    }
+                    setSectionMessage("评价已隐藏。");
+                  }}
+                />
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <p className="mt-3 rounded-xl bg-muted px-4 py-5 text-sm text-muted-foreground">
+            还没有评价。
+          </p>
+        )}
+        <nav aria-label="评价分页" className="mt-4 flex flex-wrap gap-3">
+          {snapshot.page.isPaginated ? (
+            <Link
+              href={placeFeedbackHref({ placeId, mapListReturnPath })}
+              className="inline-flex min-h-11 items-center rounded-xl border px-4 text-sm font-semibold hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              返回最新评价
+            </Link>
+          ) : null}
+          {snapshot.page.nextCursor ? (
+            <Link
+              href={placeFeedbackHref({
+                placeId,
+                reviewsAfter: snapshot.page.nextCursor,
+                mapListReturnPath,
+              })}
+              className="inline-flex min-h-11 items-center rounded-xl border px-4 text-sm font-semibold hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              查看下一页评价
+            </Link>
+          ) : null}
+        </nav>
+        <p
+          aria-live="polite"
+          className="mt-2 min-h-5 text-sm text-emerald-800 dark:text-emerald-300"
+        >
+          {sectionMessage}
+        </p>
+      </div>
+    </section>
+  );
+}

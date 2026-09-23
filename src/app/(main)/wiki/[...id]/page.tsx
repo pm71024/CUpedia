@@ -211,7 +211,7 @@ export default async function WikiReadPage({
               {getWikiDisplayTitle(page.title)}
             </h1>
             <div className="flex shrink-0 gap-2">
-              <Link href={`/wiki/history/${page.id}`}>
+              <Link href={`/wiki/history/${page.id}`} prefetch={false}>
                 <span className="inline-block rounded-full bg-secondary px-3 py-1 text-xs text-muted-foreground hover:bg-accent">
                   历史
                 </span>
@@ -258,7 +258,7 @@ export default async function WikiReadPage({
           TOC (a wide-screen reading aid) drops out there. See ADR 0010. */}
       {headings.length > 0 && (
         <nav
-          className="sticky top-14 hidden h-[calc(100vh-3.5rem)] w-[var(--toc-width)] shrink-0 overflow-y-auto border-l bg-[var(--sidebar-bg)] lg:block"
+          className="sticky top-[var(--navbar-height)] hidden h-[calc(100dvh-var(--navbar-height))] w-[var(--toc-width)] shrink-0 overflow-y-auto border-l bg-[var(--sidebar-bg)] lg:block"
           style={{ borderColor: "var(--sidebar-border-color)" }}
         >
           <PageToc

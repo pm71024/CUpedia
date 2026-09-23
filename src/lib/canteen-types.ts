@@ -5,7 +5,10 @@ import {
   type MealPeriod,
   type MealPeriodAssignment,
 } from "@/db/schema";
-import { SVG_KEY_MAX_LENGTH, collapseSectionKeyWhitespace } from "@/lib/canteen-svg-keys";
+import {
+  SVG_KEY_MAX_LENGTH,
+  collapseSectionKeyWhitespace,
+} from "@/lib/canteen-svg-keys";
 import {
   compareMealPeriodAssignments,
   mealPeriodsFromRow,
@@ -13,6 +16,15 @@ import {
   parseMealPeriod,
   primaryMealPeriodSortKey,
 } from "@/lib/canteen-meal-periods";
+import {
+  parseMenuSnapshotCompleteness,
+  type MenuSnapshotCompleteness,
+} from "./canteen-menu-snapshot-completeness";
+
+export {
+  MENU_SNAPSHOT_COMPLETENESS,
+  type MenuSnapshotCompleteness,
+} from "./canteen-menu-snapshot-completeness";
 
 export {
   MEAL_PERIODS,
@@ -54,6 +66,14 @@ export type MenuItemPricing = {
 
 export type MenuItemPriceOptionInput = Omit<CanteenPriceOption, "id">;
 
+/** One exact provider placement of an offering, before canonical projection. */
+export type MenuProviderOccurrenceInput = {
+  mealPeriod: MealPeriodAssignment;
+  categoryKey: string;
+  sortOrder: number;
+  priceOptions: MenuItemPriceOptionInput[];
+};
+
 export type CanteenMenuItem = {
   id: string;
   canteenId: string;
@@ -64,6 +84,12 @@ export type CanteenMenuItem = {
   svgKey: string;
   createdAt: Date;
   updatedAt: Date;
+};
+
+/** Latest accepted provider observation for each public meal period. */
+export type CanteenMenuFreshness = {
+  evaluatedAt: Date;
+  periods: Record<MealPeriod, Date | null>;
 };
 
 export type DeleteImpact = {
@@ -133,14 +159,146 @@ export type MenuItemJsonImportRow = {
 };
 
 export type MenuSyncItemInput = MenuItemJsonImportRow & {
-  externalKey: string;
+  externalProductId: string;
+  /** Exact period/category facts when the provider exposes repeated placements. */
+  occurrences?: MenuProviderOccurrenceInput[];
 };
 
-export type MenuSyncInput = {
-  source: string;
-  takeOverLegacyItems: boolean;
-  items: MenuSyncItemInput[];
+/** Exact occurrences, with a lossless fallback for legacy/admin payloads. */
+export function menuProviderOccurrences(
+  item: MenuSyncItemInput,
+): MenuProviderOccurrenceInput[] {
+  if (item.occurrences?.length) return item.occurrences;
+  return item.mealPeriods.map((mealPeriod) => ({
+    mealPeriod,
+    categoryKey: item.svgKey,
+    sortOrder: item.sortOrder,
+    priceOptions: item.priceOptions,
+  }));
+}
+
+export function sortMenuProviderOccurrences(
+  occurrences: readonly MenuProviderOccurrenceInput[],
+): MenuProviderOccurrenceInput[] {
+  return [...occurrences].sort(
+    (left, right) =>
+      primaryMealPeriodSortKey([left.mealPeriod]) -
+        primaryMealPeriodSortKey([right.mealPeriod]) ||
+      left.sortOrder - right.sortOrder ||
+      left.categoryKey.localeCompare(right.categoryKey) ||
+      JSON.stringify(left.priceOptions).localeCompare(
+        JSON.stringify(right.priceOptions),
+      ),
+  );
+}
+
+/** Immutable database-time context shared by one claimed provider read. */
+export type MenuObservationContext = {
+  observedAt: Date;
+  syncWindowKey: string;
+  mealPeriod: MealPeriod;
 };
+
+/** The absence boundary asserted by one normalized provider observation. */
+export type MenuObservationScope =
+  | { kind: "catalog" }
+  | { kind: "meal-period"; mealPeriod: MealPeriod };
+
+export type MenuSnapshotScopeEvidence =
+  | {
+      provider: "aigens";
+      externalStoreId: string;
+      storeName: string;
+      menuName: string;
+      providerPeriodCodes: string[];
+      categoryPeriodCodes: string[];
+      categoryCount: number;
+      groupCount: number;
+      /** Advisory HKT clock boundaries; never menu-content authority. */
+      refreshBoundaryMinutes?: number[];
+      /** Last same-day HKT minute where another provider read may be useful. */
+      refreshUntilMinute?: number;
+    }
+  | {
+      provider: "pinme";
+      menuGroupCount: number;
+      groupCount: number;
+      referencedGroupIds: string[];
+      /** Stable fingerprint of the provider's currently selected menu groups. */
+      publicationKey?: string;
+      /** Rollout-compatible fingerprint of referenced groups and service time. */
+      publicationCompatibilityKey?: string;
+      publicationWindows?: Array<{
+        publicationId: string;
+        startTime: string;
+        endTime: string;
+      }>;
+      /** Advisory HKT clock boundaries; never menu-content authority. */
+      refreshBoundaryMinutes?: number[];
+      /** Last same-day HKT minute where another provider read may be useful. */
+      refreshUntilMinute?: number;
+      serviceWindows: Array<{
+        startTime: string;
+        endTime: string;
+      }>;
+    };
+
+/** One normalized provider response before any cross-observation projection. */
+export type ProviderMenuObservation = {
+  snapshotCompleteness: MenuSnapshotCompleteness;
+  items: MenuSyncItemInput[];
+  scopeEvidence?: MenuSnapshotScopeEvidence;
+  observationScope?: MenuObservationScope;
+  /** Provider proof that an empty response is a valid, currently open menu. */
+  emptyMenuEvidence?: {
+    kind: "open-publication";
+    publicationKey: string;
+  };
+};
+
+/** Legacy/Admin command envelope around one provider observation. */
+export type MenuSyncInput = ProviderMenuObservation & {
+  takeOverLegacyItems: boolean;
+};
+
+export type MenuAbsenceAuthority =
+  | { kind: "none" }
+  | { kind: "provider-catalog" }
+  | {
+      kind: "current-activity";
+      coveredMealPeriods: MealPeriod[];
+      configuredMealPeriods: MealPeriod[];
+      publicationTransition?: "changed";
+    };
+
+/** Derived current-menu state; deliberately not a provider observation. */
+export type CurrentMenuProjection = {
+  items: MenuSyncItemInput[];
+  absenceAuthority: MenuAbsenceAuthority;
+  /** True only after the source-sync confirmation gate accepted a proven empty. */
+  confirmedEmpty?: boolean;
+};
+
+function parseMenuObservationScope(
+  input: unknown,
+): MenuObservationScope | undefined {
+  if (input === undefined) return undefined;
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error("INVALID_MENU_OBSERVATION_SCOPE");
+  }
+  const scope = input as Record<string, unknown>;
+  if (scope.kind === "catalog" && Object.keys(scope).length === 1) {
+    return { kind: "catalog" };
+  }
+  if (scope.kind === "meal-period" && Object.keys(scope).length === 2) {
+    const mealPeriod =
+      typeof scope.mealPeriod === "string"
+        ? parseMealPeriod(scope.mealPeriod)
+        : null;
+    if (mealPeriod) return { kind: "meal-period", mealPeriod };
+  }
+  throw new Error("INVALID_MENU_OBSERVATION_SCOPE");
+}
 
 /** Parse admin JSON bulk import: array or `{ items: [...] }`. */
 export function parseMenuItemsJson(input: unknown): MenuItemJsonImportRow[] {
@@ -181,7 +339,7 @@ export function parseMenuItemsJson(input: unknown): MenuItemJsonImportRow[] {
   });
 }
 
-/** Parse a complete external-source snapshot used by preview/apply sync. */
+/** Parse an external-source snapshot used by preview/apply sync. */
 export function parseMenuSyncJson(input: unknown): MenuSyncInput {
   let parsed: unknown = input;
   if (typeof input === "string") {
@@ -198,7 +356,6 @@ export function parseMenuSyncJson(input: unknown): MenuSyncInput {
     throw new Error("INVALID_MENU_SYNC");
   }
   const record = parsed as Record<string, unknown>;
-  const source = validateExternalIdentity(record.source, "INVALID_SYNC_SOURCE");
   if (
     record.takeOverLegacyItems !== undefined &&
     typeof record.takeOverLegacyItems !== "boolean"
@@ -206,20 +363,31 @@ export function parseMenuSyncJson(input: unknown): MenuSyncInput {
     throw new Error("INVALID_TAKEOVER_FLAG");
   }
   const takeOverLegacyItems = record.takeOverLegacyItems === true;
+  const snapshotCompleteness = parseMenuSnapshotCompleteness(
+    record.snapshotCompleteness,
+  );
+  const observationScope = parseMenuObservationScope(record.observationScope);
   if (!Array.isArray(record.items)) throw new Error("INVALID_MENU_SYNC");
   const rows = parseMenuItemsJson(record.items);
   const rawItems = record.items as Array<Record<string, unknown>>;
   const seen = new Set<string>();
   const items = rows.map((row, index) => {
-    const externalKey = validateExternalIdentity(
-      rawItems[index]?.externalKey,
-      "INVALID_EXTERNAL_KEY",
+    const externalProductId = validateExternalIdentity(
+      rawItems[index]?.externalProductId,
+      "INVALID_EXTERNAL_PRODUCT_ID",
     );
-    if (seen.has(externalKey)) throw new Error("DUPLICATE_EXTERNAL_KEY");
-    seen.add(externalKey);
-    return { ...row, externalKey };
+    if (seen.has(externalProductId)) {
+      throw new Error("DUPLICATE_EXTERNAL_PRODUCT_ID");
+    }
+    seen.add(externalProductId);
+    return { ...row, externalProductId };
   });
-  return { source, takeOverLegacyItems, items };
+  return {
+    snapshotCompleteness,
+    takeOverLegacyItems,
+    items,
+    ...(observationScope ? { observationScope } : {}),
+  };
 }
 
 function validateExternalIdentity(input: unknown, code: string): string {

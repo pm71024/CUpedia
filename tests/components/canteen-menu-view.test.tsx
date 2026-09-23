@@ -105,6 +105,32 @@ afterEach(() => {
 });
 
 describe("CanteenMenuView", () => {
+  it("warns when the selected meal period was last synchronized yesterday (#782)", async () => {
+    render(
+      <CanteenMenuView
+        items={ITEMS}
+        voteCounts={{}}
+        myVotes={{}}
+        freshness={{
+          evaluatedAt: hktDate(12, 0),
+          periods: {
+            breakfast: hktDate(8, 0),
+            lunch: new Date(hktDate(12, 0).getTime() - 24 * 60 * 60_000),
+            dinner: null,
+          },
+        }}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByRole("status").textContent).toBe(
+        "最后同步于昨天 12:00",
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "早餐" }));
+    await waitFor(() => expect(screen.queryByText(/最后同步于/)).toBeNull());
+  });
+
   it("shows one menu for the current meal period with ranking view tabs", async () => {
     render(<CanteenMenuView items={ITEMS} voteCounts={{}} myVotes={{}} />);
 
@@ -374,12 +400,14 @@ describe("CanteenMenuView", () => {
 
   it("uses the finder for search and category jumps without filtering the menu", async () => {
     const mixed = [
-      item("rice-1", "lunch", "演示菜品 A", "rice"),
-      item("drink-1", "lunch", "演示菜品 B", "drink"),
-      item("noodle-1", "lunch", "演示菜品 C", "noodle"),
+      ...Array.from({ length: 20 }, (_, index) =>
+        item(`rice-${index}`, "lunch", `演示饭类 ${index + 1}`, "rice"),
+      ),
+      item("drink-1", "lunch", "隐藏饮品", "drink"),
     ];
     render(<CanteenMenuView items={mixed} voteCounts={{}} myVotes={{}} />);
-    await waitFor(() => expect(screen.getByText("演示菜品 A")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("演示饭类 1")).toBeTruthy());
+    expect(screen.queryByText("隐藏饮品")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "查找菜品" }));
     const finder = screen.getByRole("dialog");
@@ -388,14 +416,14 @@ describe("CanteenMenuView", () => {
     expect(within(finder).getByRole("button", { name: /饮品/ })).toBeTruthy();
 
     fireEvent.change(screen.getByRole("searchbox", { name: "搜索菜品" }), {
-      target: { value: "演示菜品 B" },
+      target: { value: "隐藏饮品" },
     });
     expect(screen.getByText("找到 1 道菜")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "演示菜品 B" }));
+    fireEvent.click(screen.getByRole("button", { name: "隐藏饮品" }));
 
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(screen.getByText("演示菜品 A")).toBeTruthy();
-    expect(screen.getByText("演示菜品 C")).toBeTruthy();
+    expect(screen.getByText("演示饭类 1")).toBeTruthy();
+    expect(screen.getByText("隐藏饮品")).toBeTruthy();
     await waitFor(() =>
       expect(
         window.scrollTo as unknown as ReturnType<typeof vi.fn>,
@@ -403,8 +431,26 @@ describe("CanteenMenuView", () => {
     );
   });
 
+  it("mounts a hidden section before a sidebar jump", async () => {
+    const mixed = [
+      ...Array.from({ length: 20 }, (_, index) =>
+        item(`rice-${index}`, "lunch", `饭类 ${index + 1}`, "rice"),
+      ),
+      item("drink-1", "lunch", "隐藏饮品", "drink"),
+    ];
+    render(<CanteenMenuView items={mixed} voteCounts={{}} myVotes={{}} />);
+    await waitFor(() => expect(screen.getByText("饭类 1")).toBeTruthy());
+    expect(screen.queryByText("隐藏饮品")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "饮品" }));
+
+    await waitFor(() => expect(screen.getByText("隐藏饮品")).toBeTruthy());
+    expect(screen.getAllByRole("listitem")).toHaveLength(21);
+    await waitFor(() => expect(window.scrollTo).toHaveBeenCalled());
+  });
+
   it("renders a long menu as grouped semantic sections", async () => {
-    const longMenu = Array.from({ length: 100 }, (_, index) =>
+    const longMenu = Array.from({ length: 40 }, (_, index) =>
       item(
         `dish-${index}`,
         "lunch",
@@ -414,10 +460,21 @@ describe("CanteenMenuView", () => {
     );
     render(<CanteenMenuView items={longMenu} voteCounts={{}} myVotes={{}} />);
 
-    await waitFor(() => expect(screen.getByText("菜品 100")).toBeTruthy());
-    expect(screen.getAllByRole("listitem")).toHaveLength(100);
+    await waitFor(() => expect(screen.getByText("菜品 1")).toBeTruthy());
+    // First page stays within 饭类 (even-index dishes), so 粉面 is not mounted yet.
+    expect(screen.getAllByRole("listitem")).toHaveLength(15);
     expect(screen.getByRole("heading", { name: /饭类/ })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: /粉面/ })).toBeNull();
+    expect(screen.getByText("已显示 15 / 40 道菜")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "加载更多" }));
+    expect(screen.getAllByRole("listitem")).toHaveLength(30);
+    expect(screen.getByText("已显示 30 / 40 道菜")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "加载更多" }));
+    expect(screen.getAllByRole("listitem")).toHaveLength(40);
     expect(screen.getByRole("heading", { name: /粉面/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "加载更多" })).toBeNull();
   });
 
   it("keeps the menu compact and opens price details in one dialog", async () => {

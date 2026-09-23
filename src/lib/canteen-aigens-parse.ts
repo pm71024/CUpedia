@@ -1,14 +1,18 @@
-import { resolveMenuSectionKey } from "@/lib/canteen-svg-keys";
+import { assertProviderMenuIdentityItems } from "./canteen-provider-menu-identity";
+import { compareProviderText } from "./canteen-provider-menu-ordering";
+import { resolveMenuSectionKey } from "./canteen-svg-keys";
 import {
   ALLDAY_MEAL_PERIOD,
+  normalizeMealPeriods,
   primaryMealPeriodSortKey,
   type MealPeriod,
   type MealPeriodAssignment,
-} from "@/lib/canteen-types";
+  type MenuItemPriceOptionInput,
+  type MenuProviderOccurrenceInput,
+} from "./canteen-types";
 
 export type AigensItem = {
   backendId?: string;
-  id?: string;
   name?: string;
   price?: number;
   published?: boolean;
@@ -39,10 +43,69 @@ export type AigensParsedProduct = {
   backendId: string;
   name: string;
   categoryName: string;
-  amountMinor: number;
+  priceOptions: MenuItemPriceOptionInput[];
   periods: MealPeriodAssignment[];
   svgKey: string;
+  occurrences: MenuProviderOccurrenceInput[];
 };
+
+type AigensAggregatedProduct = Omit<
+  AigensParsedProduct,
+  "priceOptions" | "occurrences"
+> & {
+  priceContexts: AigensPriceContext[];
+};
+
+type AigensPriceContext = {
+  categoryLabel: string;
+  mealPeriod: MealPeriodAssignment;
+  amountMinor: number;
+  sortOrder: number;
+};
+
+const MEAL_PERIOD_LABEL: Record<MealPeriodAssignment, string> = {
+  breakfast: "早餐",
+  lunch: "午餐",
+  dinner: "晚餐",
+  allday: "全天",
+};
+
+function materializePriceOptions(
+  contexts: readonly AigensPriceContext[],
+): MenuItemPriceOptionInput[] {
+  const amountsByCategory = new Map<string, Set<number>>();
+  for (const context of contexts) {
+    const amounts = amountsByCategory.get(context.categoryLabel) ?? new Set();
+    amounts.add(context.amountMinor);
+    amountsByCategory.set(context.categoryLabel, amounts);
+  }
+
+  const labelByAmount = new Map<number, string>();
+  for (const context of contexts) {
+    const categoryHasPeriodSpecificPrices =
+      (amountsByCategory.get(context.categoryLabel)?.size ?? 0) > 1;
+    const label = categoryHasPeriodSpecificPrices
+      ? `${MEAL_PERIOD_LABEL[context.mealPeriod]} · ${context.categoryLabel}`
+      : context.categoryLabel;
+    const current = labelByAmount.get(context.amountMinor);
+    if (current === undefined || compareProviderText(label, current) < 0) {
+      labelByAmount.set(context.amountMinor, label);
+    }
+  }
+  const distinctPrices = [...labelByAmount.entries()]
+    .map(([amountMinor, label]) => ({ label, amountMinor }))
+    .sort(
+      (left, right) =>
+        compareProviderText(left.label, right.label) ||
+        left.amountMinor - right.amountMinor,
+    );
+  return distinctPrices.map((context, sortOrder) => ({
+    label: distinctPrices.length === 1 ? null : context.label,
+    amountMinor: context.amountMinor,
+    currency: "HKD",
+    sortOrder,
+  }));
+}
 
 export function parseAigensPrice(price: unknown): number {
   if (typeof price !== "number" || !Number.isFinite(price) || price < 0) {
@@ -70,20 +133,67 @@ export function parseAigensMenuProducts(
   input: unknown,
   options: { excludedCategories: ReadonlySet<string> },
 ): AigensParsedProduct[] {
-  const root = input as {
-    data?: { menu?: { categories?: AigensCategory[]; groups?: AigensGroup[] } };
-  };
-  const categories = root?.data?.menu?.categories;
-  const groups = root?.data?.menu?.groups;
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error("INVALID_AIGENS_MENU");
+  }
+  const data = (input as Record<string, unknown>).data;
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    throw new Error("INVALID_AIGENS_MENU");
+  }
+  const menu = (data as Record<string, unknown>).menu;
+  if (!menu || typeof menu !== "object" || Array.isArray(menu)) {
+    throw new Error("INVALID_AIGENS_MENU");
+  }
+  const categories = (menu as Record<string, unknown>).categories;
+  const groups = (menu as Record<string, unknown>).groups;
   if (!Array.isArray(categories) || !Array.isArray(groups)) {
+    throw new Error("INVALID_AIGENS_MENU");
+  }
+
+  if (
+    !categories.every(
+      (category): category is AigensCategory =>
+        Boolean(category) &&
+        typeof category === "object" &&
+        !Array.isArray(category) &&
+        (category.name === undefined || typeof category.name === "string") &&
+        (category.periods === undefined ||
+          (Array.isArray(category.periods) &&
+            category.periods.every(
+              (value: unknown) => typeof value === "string",
+            ))) &&
+        (category.groupIds === undefined ||
+          (Array.isArray(category.groupIds) &&
+            category.groupIds.every(
+              (value: unknown) => typeof value === "string",
+            ))),
+    ) ||
+    !groups.every(
+      (group): group is AigensGroup =>
+        Boolean(group) &&
+        typeof group === "object" &&
+        !Array.isArray(group) &&
+        (group.id === undefined || typeof group.id === "string") &&
+        (group.items === undefined ||
+          (Array.isArray(group.items) &&
+            group.items.every(
+              (item: unknown) =>
+                Boolean(item) &&
+                typeof item === "object" &&
+                !Array.isArray(item),
+            ))),
+    )
+  ) {
     throw new Error("INVALID_AIGENS_MENU");
   }
 
   const groupsById = new Map(
     groups.filter((group) => group.id).map((group) => [group.id!, group]),
   );
-  const products: AigensParsedProduct[] = [];
-  const seen = new Set<string>();
+  const products: AigensAggregatedProduct[] = [];
+  const seen = new Map<string, AigensAggregatedProduct>();
+  const validatedGroupIds = new Set<string>();
+  let providerOccurrenceOrder = 0;
 
   for (const category of categories) {
     if (!category.name || options.excludedCategories.has(category.name)) {
@@ -104,34 +214,132 @@ export function parseAigensMenuProducts(
     const periods: MealPeriodAssignment[] =
       mappedPeriods.length > 0 ? mappedPeriods : [ALLDAY_MEAL_PERIOD];
 
+    if (!validatedGroupIds.has(primaryGroup.id!)) {
+      const groupItems = primaryGroup.items.filter(
+        (item) => !isSkippableItem(item),
+      );
+      if (groupItems.length > 0) {
+        assertProviderMenuIdentityItems(
+          "aigens",
+          groupItems.map((item) => {
+            const backendId = String(item.backendId ?? "").trim();
+            return {
+              externalProductId: backendId,
+              name: item.name!.trim().replace(/\s+/g, " "),
+              amountMinor: parseAigensPrice(item.price),
+            };
+          }),
+        );
+      }
+      validatedGroupIds.add(primaryGroup.id!);
+    }
+
     for (const item of primaryGroup.items) {
       if (isSkippableItem(item)) continue;
-      const backendId = String(item.backendId ?? item.id ?? "").trim();
-      if (!backendId) continue;
+      const backendId = String(item.backendId ?? "").trim();
+      assertProviderMenuIdentityItems("aigens", [
+        {
+          externalProductId: backendId,
+        },
+      ]);
       const name = item.name!.trim().replace(/\s+/g, " ");
       const amountMinor = parseAigensPrice(item.price);
+      const itemSortOrder = providerOccurrenceOrder++;
       const svgKey = resolveMenuSectionKey({
         categoryName: category.name,
         dishName: name,
       });
 
-      for (const mealPeriod of periods) {
-        const dedupeKey = `${backendId}:${mealPeriod}`;
-        if (seen.has(dedupeKey)) continue;
-        seen.add(dedupeKey);
-        products.push({
+      const existing = seen.get(backendId);
+      if (!existing) {
+        const product = {
           backendId,
           name,
           categoryName: category.name,
-          amountMinor,
-          periods: [mealPeriod],
+          priceContexts: periods.map((mealPeriod) => ({
+            categoryLabel: svgKey,
+            mealPeriod,
+            amountMinor,
+            sortOrder: itemSortOrder,
+          })),
+          periods,
           svgKey,
-        });
+        } satisfies AigensAggregatedProduct;
+        seen.set(backendId, product);
+        products.push(product);
+        continue;
+      }
+
+      if (existing.name !== name) {
+        assertProviderMenuIdentityItems("aigens", [
+          { externalProductId: backendId, name: existing.name },
+          { externalProductId: backendId, name },
+        ]);
+      }
+      for (const mealPeriod of periods) {
+        const sameContext = existing.priceContexts.find(
+          (context) =>
+            context.categoryLabel === svgKey &&
+            context.mealPeriod === mealPeriod,
+        );
+        if (sameContext) {
+          if (sameContext.amountMinor !== amountMinor) {
+            assertProviderMenuIdentityItems("aigens", [
+              {
+                externalProductId: backendId,
+                name,
+                priceOptions: [sameContext],
+              },
+              {
+                externalProductId: backendId,
+                name,
+                priceOptions: [
+                  {
+                    categoryLabel: svgKey,
+                    mealPeriod,
+                    amountMinor,
+                  },
+                ],
+              },
+            ]);
+          }
+        } else {
+          existing.priceContexts.push({
+            categoryLabel: svgKey,
+            mealPeriod,
+            amountMinor,
+            sortOrder: itemSortOrder,
+          });
+        }
+      }
+      existing.periods = normalizeMealPeriods([
+        ...existing.periods,
+        ...periods,
+      ])!;
+      if (compareProviderText(svgKey, existing.svgKey) < 0) {
+        existing.categoryName = category.name;
+        existing.svgKey = svgKey;
       }
     }
   }
 
-  return products;
+  return products.map(({ priceContexts, ...product }) => ({
+    ...product,
+    priceOptions: materializePriceOptions(priceContexts),
+    occurrences: priceContexts.map((context) => ({
+      mealPeriod: context.mealPeriod,
+      categoryKey: context.categoryLabel,
+      sortOrder: context.sortOrder,
+      priceOptions: [
+        {
+          label: null,
+          amountMinor: context.amountMinor,
+          currency: "HKD",
+          sortOrder: 0,
+        },
+      ],
+    })),
+  }));
 }
 
 /**
@@ -143,12 +351,14 @@ export function assignMealPeriodSortOrder<
   items: T[],
   mealPeriodsOf: (item: T) => readonly MealPeriodAssignment[],
 ): T[] {
-  const sorted = items.slice().sort(
-    (a, b) =>
-      primaryMealPeriodSortKey(mealPeriodsOf(a)) -
-        primaryMealPeriodSortKey(mealPeriodsOf(b)) ||
-      a.name.localeCompare(b.name, "zh-HK"),
-  );
+  const sorted = items
+    .slice()
+    .sort(
+      (a, b) =>
+        primaryMealPeriodSortKey(mealPeriodsOf(a)) -
+          primaryMealPeriodSortKey(mealPeriodsOf(b)) ||
+        a.name.localeCompare(b.name, "zh-HK"),
+    );
   sorted.forEach((item, index) => {
     item.sortOrder = index;
   });

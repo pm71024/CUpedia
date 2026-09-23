@@ -73,7 +73,7 @@ export function ProfessorCourseExplorer({
   );
 
   function courseHref(code: string) {
-    return `/courses/${encodeURIComponent(code)}?from=${encodeURIComponent(detailPath)}`;
+    return `/courses/${encodeURIComponent(code)}?professor=${professor.publicId}&from=${encodeURIComponent(detailPath)}#peer-reviews`;
   }
 
   function reviewHref(code: string) {
@@ -279,6 +279,7 @@ function CourseRow({
       </div>
       <Link
         href={reviewHref}
+        prefetch={false}
         aria-label={`评价 ${course.code}`}
         className="inline-flex min-h-11 items-center rounded-lg px-3 text-sm font-medium hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
@@ -352,6 +353,7 @@ function CourseResults({
               </div>
               <Link
                 href={reviewHref(course.code)}
+                prefetch={false}
                 aria-label={`评价 ${course.code}`}
                 className="inline-flex min-h-11 items-center rounded-lg px-3 text-sm font-medium hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >

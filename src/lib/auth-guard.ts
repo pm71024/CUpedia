@@ -10,6 +10,7 @@ import {
 } from "@/lib/site-settings";
 import { canViewerEdit } from "@/lib/edit-permission";
 import { normalizeEmail } from "@/lib/email";
+import { safeAuthReturnPath } from "@/lib/auth-return";
 import { headers } from "next/headers";
 
 /** True if the email already has a password (credential) account — i.e. it
@@ -30,11 +31,18 @@ export async function isEmailRegistered(email: string): Promise<boolean> {
   return rows.length > 0;
 }
 
-export async function requireAuth() {
+export async function requireAuth(callbackUrl?: string) {
   const session = await auth.api.getSession({
     headers: await headers(),
   });
-  if (!session?.user?.id) redirect("/login");
+  if (!session?.user?.id) {
+    const safeCallbackUrl = safeAuthReturnPath(callbackUrl);
+    redirect(
+      safeCallbackUrl === "/"
+        ? "/login"
+        : `/login?callbackUrl=${encodeURIComponent(safeCallbackUrl)}`,
+    );
+  }
 
   const dbUser = await db.query.users.findFirst({
     where: eq(users.id, session.user.id),
@@ -207,8 +215,8 @@ export async function getAdminUserForApi() {
   };
 }
 
-/** For API routes: returns the current non-banned user, or null. */
-export async function getAuthenticatedUserForApi() {
+/** For API routes that must distinguish anonymous and banned callers. */
+export async function getAuthenticatedUserStateForApi() {
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session?.user?.id) return null;
 
@@ -222,6 +230,13 @@ export async function getAuthenticatedUserForApi() {
       banned: true,
     },
   });
+  if (!dbUser) return null;
+  return dbUser;
+}
+
+/** For API routes: returns the current non-banned user, or null. */
+export async function getAuthenticatedUserForApi() {
+  const dbUser = await getAuthenticatedUserStateForApi();
   if (!dbUser || dbUser.banned) return null;
   return {
     id: dbUser.id,

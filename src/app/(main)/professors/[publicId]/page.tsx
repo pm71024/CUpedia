@@ -67,7 +67,7 @@ export default async function ProfessorDetailPage({
 
         <section className="mt-8 grid gap-6 border-b pb-8 sm:grid-cols-[144px_1fr_auto] sm:items-center">
           <ProfessorPortrait
-            imageUrls={professor.imageUrls}
+            portrait={professor.portrait}
             name={professor.name}
           />
           <div className="min-w-0">
@@ -118,6 +118,7 @@ export default async function ProfessorDetailPage({
                   ? primaryReviewHref
                   : `${detailPath}&chooseCourse=1`
               }
+              prefetch={false}
               className="mt-4 inline-flex min-h-11 items-center justify-center rounded-lg bg-foreground px-4 text-sm font-medium text-background transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
               {professor.courses.length === 1 ? "写评价" : "选择课程评价"}

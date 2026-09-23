@@ -1,0 +1,1014 @@
+import {
+  CAMPUS_MAP_CAPABILITIES,
+  CAMPUS_MAP_COORDINATE_CONVERSION_METHODS,
+  CAMPUS_MAP_FACT_SCHEMA_V2,
+  CAMPUS_MAP_PLACE_TYPES,
+  CAMPUS_MAP_SOURCE_COORDINATE_CRS,
+  CAMPUS_MAP_V2_GENDERS,
+  CAMPUS_MAP_V2_WHEELCHAIR_ACCESS,
+  type CampusMapProvenanceKind,
+} from "@/db/schema";
+import type {
+  CampusMapAppendFact,
+  CampusMapAppendProvenanceSource,
+} from "@/lib/campus-map/fact-store-transaction";
+import type {
+  CampusMapPublishCommand,
+  CampusMapPublishFactInput,
+  CampusMapPublishIssueAnchor,
+  CampusMapPublishPhotoInput,
+  CampusMapPublishResult,
+  CampusMapPublishSourceInput,
+  CampusMapPublishValidationIssue,
+} from "@/lib/campus-map/publish-contract";
+import {
+  canonicalizeCampusMapUuid,
+  isCampusMapUuid,
+} from "@/lib/campus-map/canonical-uuid";
+import {
+  campusMapFactNameError,
+  campusMapOptionalShortTextIsValid,
+  CAMPUS_MAP_VISIT_NOTE_MAX_BYTES,
+} from "@/lib/campus-map/edit-schema";
+import {
+  campusMapFloorLabelError,
+  isCampusMapFloorEvidenceSource,
+} from "@/lib/campus-map/floor-label";
+import {
+  CAMPUS_MAP_PLACE_PHOTO_MAX_COUNT,
+  CAMPUS_MAP_PLACE_PHOTO_ROLES,
+} from "@/lib/campus-map/place-photos-contract";
+import {
+  campusMapOfficialActionError,
+  CAMPUS_MAP_OFFICIAL_ACTION_MAX_COUNT,
+} from "@/lib/campus-map/official-action";
+import { isCampusMapRegularHours } from "@/lib/campus-map/regular-hours";
+import {
+  campusMapUtf8ByteLength,
+  containsInvalidCampusMapPostgresText,
+} from "@/lib/campus-map/text-validation";
+
+const MAX_COMMENT_BYTES = 2_000;
+const MAX_SOURCE_SUMMARY_BYTES = 2_000;
+const MAX_CLIENT_NAME_BYTES = 120;
+const MAX_CLIENT_VERSION_BYTES = 120;
+const MAX_WARNING_CODE_BYTES = 120;
+const MAX_WARNING_ACKNOWLEDGEMENTS = 25;
+const MAX_SINGLE_COMMAND_BYTES = 32 * 1_024;
+const MAX_BULK_COMMAND_BYTES = 512 * 1_024;
+const MAX_SOURCE_REF_BYTES = 512;
+const MAX_SOURCE_URL_BYTES = 2_048;
+const MAX_SOURCE_OWNER_BYTES = 240;
+const MAX_SOURCE_VERSION_BYTES = 160;
+const MAX_SOURCE_HASH_BYTES = 256;
+const MAX_SOURCE_TEXT_BYTES = 2_000;
+// PostgreSQL timestamps start at 4713 BC (astronomical year -4712). The
+// JavaScript Date upper bound is already below PostgreSQL's upper bound.
+const POSTGRES_TIMESTAMP_MIN_MILLISECONDS = Date.parse(
+  "-004712-01-01T00:00:00.000Z",
+);
+
+function normalizeOptionalPhotos(
+  photos: CampusMapPublishPhotoInput[] | undefined,
+) {
+  if (photos === undefined) return {};
+  return {
+    photos: photos.map((item) => ({
+      ...item,
+      assetId: canonicalizeCampusMapUuid(item.assetId),
+    })),
+  };
+}
+
+/** Normalizes UUID identity once before fingerprinting or domain comparisons. */
+export function normalizePublishCommandIdentifiers(
+  command: CampusMapPublishCommand,
+): CampusMapPublishCommand {
+  return {
+    ...command,
+    idempotencyKey: canonicalizeCampusMapUuid(command.idempotencyKey),
+    changes: command.changes.map((change) => {
+      if (change.operation === "create") {
+        return {
+          ...change,
+          ...normalizeOptionalPhotos(change.photos),
+          fact: {
+            ...change.fact,
+            buildingId: canonicalizeCampusMapUuid(change.fact.buildingId),
+            floorId: canonicalizeCampusMapUuid(change.fact.floorId),
+          },
+        };
+      }
+      if (change.operation === "retire") {
+        return {
+          ...change,
+          placeId: canonicalizeCampusMapUuid(change.placeId),
+          baseRevisionId: canonicalizeCampusMapUuid(change.baseRevisionId),
+        };
+      }
+      if (change.operation === "merge") {
+        return {
+          ...change,
+          placeId: canonicalizeCampusMapUuid(change.placeId),
+          baseRevisionId: canonicalizeCampusMapUuid(change.baseRevisionId),
+          mergedIntoPlaceId: canonicalizeCampusMapUuid(
+            change.mergedIntoPlaceId,
+          ),
+        };
+      }
+      if (change.operation === "update" || change.operation === "restore") {
+        return {
+          ...change,
+          ...(change.operation === "update"
+            ? normalizeOptionalPhotos(change.photos)
+            : {}),
+          placeId: canonicalizeCampusMapUuid(change.placeId),
+          baseRevisionId: canonicalizeCampusMapUuid(change.baseRevisionId),
+          fact: {
+            ...change.fact,
+            buildingId: canonicalizeCampusMapUuid(change.fact.buildingId),
+            floorId: canonicalizeCampusMapUuid(change.fact.floorId),
+          },
+        };
+      }
+      return change;
+    }),
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+export function hasPublishCommandStructure(
+  command: unknown,
+): command is CampusMapPublishCommand {
+  if (!isRecord(command)) return false;
+  if (
+    !Array.isArray(command.changes) ||
+    !Array.isArray(command.warningAcknowledgements) ||
+    !isRecord(command.client)
+  ) {
+    return false;
+  }
+  return command.changes.every((change) => {
+    if (!isRecord(change) || !Array.isArray(change.sources)) return false;
+    if (!change.sources.every(isRecord)) return false;
+    if (
+      "photos" in change &&
+      (!Array.isArray(change.photos) || !change.photos.every(isRecord))
+    ) {
+      return false;
+    }
+    if ("requestedFloor" in change && !isRecord(change.requestedFloor)) {
+      return false;
+    }
+    return (
+      change.operation === "retire" ||
+      change.operation === "merge" ||
+      isRecord(change.fact)
+    );
+  });
+}
+
+export function invalidCommandResult(): Extract<
+  CampusMapPublishResult,
+  { status: "validation-failed" }
+> {
+  return {
+    status: "validation-failed",
+    errors: [{ code: "invalid-command", anchor: { field: "command" } }],
+    warnings: [],
+    suggestions: [],
+  };
+}
+
+export function isPublishCommandTooLarge(
+  serializedCommand: string,
+  kind: CampusMapPublishCommand["kind"],
+): boolean {
+  const limit =
+    kind === "bulk" ? MAX_BULK_COMMAND_BYTES : MAX_SINGLE_COMMAND_BYTES;
+  return campusMapUtf8ByteLength(serializedCommand) > limit;
+}
+
+export function isValidPublishIdempotencyKey(value: unknown): value is string {
+  return isCampusMapUuid(value);
+}
+
+export function validateComment(
+  comment: unknown,
+): CampusMapPublishValidationIssue[] {
+  if (typeof comment !== "string" || comment.trim() === "") {
+    return [{ code: "comment-required", anchor: { field: "comment" } }];
+  }
+  if (containsInvalidCampusMapPostgresText(comment)) {
+    return [{ code: "comment-invalid", anchor: { field: "comment" } }];
+  }
+  return campusMapUtf8ByteLength(comment) > MAX_COMMENT_BYTES
+    ? [{ code: "comment-too-long", anchor: { field: "comment" } }]
+    : [];
+}
+
+export function validateChangesetMetadata(
+  command: CampusMapPublishCommand,
+): CampusMapPublishValidationIssue[] {
+  const errors: CampusMapPublishValidationIssue[] = [];
+  if (command.kind !== "single" && command.kind !== "bulk") {
+    errors.push({ code: "invalid-command-kind", anchor: { field: "kind" } });
+  }
+  if (
+    typeof command.sourceSummary !== "string" ||
+    command.sourceSummary.trim() === ""
+  ) {
+    errors.push({
+      code: "source-summary-required",
+      anchor: { field: "sourceSummary" },
+    });
+  } else if (containsInvalidCampusMapPostgresText(command.sourceSummary)) {
+    errors.push({
+      code: "source-summary-invalid",
+      anchor: { field: "sourceSummary" },
+    });
+  } else if (
+    campusMapUtf8ByteLength(command.sourceSummary) > MAX_SOURCE_SUMMARY_BYTES
+  ) {
+    errors.push({
+      code: "source-summary-too-long",
+      anchor: { field: "sourceSummary" },
+    });
+  }
+  validateRequiredMetadataText(
+    errors,
+    command.client.name,
+    MAX_CLIENT_NAME_BYTES,
+    "client-name-required",
+    "client-name-invalid",
+    "client-name-too-long",
+    "client.name",
+  );
+  validateRequiredMetadataText(
+    errors,
+    command.client.version,
+    MAX_CLIENT_VERSION_BYTES,
+    "client-version-required",
+    "client-version-invalid",
+    "client-version-too-long",
+    "client.version",
+  );
+  if (typeof command.reviewRequested !== "boolean") {
+    errors.push({
+      code: "invalid-review-requested",
+      anchor: { field: "reviewRequested" },
+    });
+  }
+  if (command.warningAcknowledgements.length > MAX_WARNING_ACKNOWLEDGEMENTS) {
+    errors.push({
+      code: "warning-acknowledgement-limit-exceeded",
+      anchor: { field: "warningAcknowledgements" },
+    });
+  }
+  for (const acknowledgement of command.warningAcknowledgements) {
+    const record = isRecord(acknowledgement) ? acknowledgement : null;
+    const changeIndex = record?.changeIndex;
+    if (
+      !record ||
+      !Number.isInteger(changeIndex) ||
+      (changeIndex as number) < 0 ||
+      (changeIndex as number) >= command.changes.length ||
+      typeof record.code !== "string" ||
+      record.code.trim() === "" ||
+      campusMapUtf8ByteLength(record.code) > MAX_WARNING_CODE_BYTES ||
+      typeof record.fingerprint !== "string" ||
+      !/^[0-9a-f]{64}$/.test(record.fingerprint)
+    ) {
+      errors.push({
+        code: "warning-acknowledgement-invalid",
+        anchor: {
+          ...(Number.isInteger(changeIndex)
+            ? { changeIndex: changeIndex as number }
+            : {}),
+          field: "warningAcknowledgements",
+        },
+      });
+    }
+  }
+  return errors;
+}
+
+function validateRequiredMetadataText(
+  errors: CampusMapPublishValidationIssue[],
+  value: unknown,
+  maxBytes: number,
+  requiredCode: string,
+  invalidCode: string,
+  tooLongCode: string,
+  field: string,
+): void {
+  if (typeof value !== "string" || value.trim() === "") {
+    errors.push({ code: requiredCode, anchor: { field } });
+  } else if (containsInvalidCampusMapPostgresText(value)) {
+    errors.push({ code: invalidCode, anchor: { field } });
+  } else if (campusMapUtf8ByteLength(value) > maxBytes) {
+    errors.push({ code: tooLongCode, anchor: { field } });
+  }
+}
+
+export function validateChangeIdentities(
+  command: CampusMapPublishCommand,
+): CampusMapPublishValidationIssue[] {
+  const errors: CampusMapPublishValidationIssue[] = [];
+  const seenPlaces = new Set<string>();
+  for (const [changeIndex, change] of command.changes.entries()) {
+    if (
+      change.operation !== "create" &&
+      change.operation !== "update" &&
+      change.operation !== "retire" &&
+      change.operation !== "restore" &&
+      change.operation !== "merge"
+    ) {
+      errors.push({
+        code: "invalid-operation",
+        anchor: { changeIndex, field: "operation" },
+      });
+      continue;
+    }
+    if (change.operation === "create") continue;
+    if ("requestedFloor" in change) {
+      errors.push({
+        code: "requested-floor-create-only",
+        anchor: { changeIndex, field: "requestedFloor" },
+      });
+    }
+    if (
+      typeof change.placeId !== "string" ||
+      !isCampusMapUuid(change.placeId)
+    ) {
+      errors.push({
+        code: "invalid-place-id",
+        anchor: { changeIndex, field: "placeId" },
+      });
+    } else if (seenPlaces.has(change.placeId)) {
+      errors.push({
+        code: "duplicate-place-change",
+        anchor: { changeIndex, placeId: change.placeId, field: "placeId" },
+      });
+    } else {
+      seenPlaces.add(change.placeId);
+    }
+    if (
+      typeof change.baseRevisionId !== "string" ||
+      !isCampusMapUuid(change.baseRevisionId)
+    ) {
+      errors.push({
+        code: "invalid-base-revision-id",
+        anchor: { changeIndex, field: "baseRevisionId" },
+      });
+    }
+    if (change.operation === "merge") {
+      if (
+        typeof change.mergedIntoPlaceId !== "string" ||
+        !isCampusMapUuid(change.mergedIntoPlaceId)
+      ) {
+        errors.push({
+          code: "invalid-merge-survivor-id",
+          anchor: { changeIndex, field: "mergedIntoPlaceId" },
+        });
+      } else if (change.mergedIntoPlaceId === change.placeId) {
+        errors.push({
+          code: "merge-place-must-differ",
+          anchor: {
+            changeIndex,
+            placeId: change.placeId,
+            field: "mergedIntoPlaceId",
+          },
+        });
+      }
+    }
+  }
+  for (const [changeIndex, change] of command.changes.entries()) {
+    if (!("requestedFloor" in change)) continue;
+    if (change.operation !== "create") continue;
+    if (command.kind !== "single") {
+      errors.push({
+        code: "requested-floor-single-only",
+        anchor: { changeIndex, field: "requestedFloor" },
+      });
+    }
+    const requestedFloor = change.requestedFloor;
+    if (!requestedFloor) {
+      errors.push({
+        code: "invalid-requested-floor",
+        anchor: { changeIndex, field: "requestedFloor" },
+      });
+      continue;
+    }
+    const labelError = campusMapFloorLabelError(requestedFloor.displayLabel);
+    if (!hasOnlyKeys(requestedFloor, ["displayLabel"]) || labelError !== null) {
+      errors.push({
+        code: labelError ?? "invalid-requested-floor",
+        anchor: { changeIndex, field: "requestedFloor.displayLabel" },
+      });
+    }
+    if (
+      change.fact.location?.kind !== "building" ||
+      change.fact.floorId !== null ||
+      typeof change.fact.buildingId !== "string" ||
+      !isCampusMapUuid(change.fact.buildingId)
+    ) {
+      errors.push({
+        code: "invalid-requested-floor-location",
+        anchor: { changeIndex, field: "location" },
+      });
+    }
+    if (!change.sources.some(isCampusMapFloorEvidenceSource)) {
+      errors.push({
+        code: "requested-floor-user-source-required",
+        anchor: { changeIndex, field: "requestedFloor" },
+      });
+    }
+  }
+  for (const [changeIndex, change] of command.changes.entries()) {
+    if (change.operation !== "create" && change.operation !== "update") {
+      if ("photos" in change) {
+        errors.push({
+          code: "photos-operation-not-supported",
+          anchor: { changeIndex, field: "photos" },
+        });
+      }
+      continue;
+    }
+    if (change.photos === undefined) continue;
+    if (change.photos.length > CAMPUS_MAP_PLACE_PHOTO_MAX_COUNT) {
+      errors.push({
+        code: "photo-limit-exceeded",
+        anchor: { changeIndex, field: "photos" },
+      });
+      continue;
+    }
+    const seenAssetIds = new Set<string>();
+    for (const item of change.photos) {
+      if (!isRecord(item)) {
+        errors.push({
+          code: "photo-invalid",
+          anchor: { changeIndex, field: "photos" },
+        });
+        continue;
+      }
+      if (typeof item.assetId !== "string" || !isCampusMapUuid(item.assetId)) {
+        errors.push({
+          code: "photo-invalid-id",
+          anchor: { changeIndex, field: "photos" },
+        });
+      } else if (seenAssetIds.has(item.assetId)) {
+        errors.push({
+          code: "photo-duplicate",
+          anchor: { changeIndex, field: "photos" },
+        });
+      } else {
+        seenAssetIds.add(item.assetId);
+      }
+      if (
+        typeof item.role !== "string" ||
+        !CAMPUS_MAP_PLACE_PHOTO_ROLES.includes(
+          item.role as (typeof CAMPUS_MAP_PLACE_PHOTO_ROLES)[number],
+        )
+      ) {
+        errors.push({
+          code: "photo-role-invalid",
+          anchor: { changeIndex, field: "photos" },
+        });
+      }
+    }
+  }
+  return errors;
+}
+
+export function validateFact(
+  fact: CampusMapPublishFactInput,
+  changeIndex: number,
+): CampusMapPublishValidationIssue[] {
+  const errors: CampusMapPublishValidationIssue[] = [];
+  const anchor = (field: string): CampusMapPublishIssueAnchor => ({
+    changeIndex,
+    field,
+  });
+  const nameError = campusMapFactNameError(fact.name);
+  if (nameError) errors.push({ code: nameError, anchor: anchor("name") });
+  if (
+    !isRecord(fact) ||
+    !hasOnlyKeys(fact, [
+      "name",
+      "buildingId",
+      "floorId",
+      "placeType",
+      "regularHours",
+      "officialActions",
+      "visitNote",
+      "capabilities",
+      "gender",
+      "wheelchairAccess",
+      "location",
+      "observedAt",
+    ])
+  ) {
+    errors.push({ code: "invalid-fact-shape", anchor: anchor("fact") });
+  }
+  if (!CAMPUS_MAP_PLACE_TYPES.includes(fact.placeType)) {
+    errors.push({ code: "invalid-place-type", anchor: anchor("placeType") });
+  }
+  if (
+    !Array.isArray(fact.capabilities) ||
+    fact.capabilities.some(
+      (capability) => !CAMPUS_MAP_CAPABILITIES.includes(capability),
+    ) ||
+    new Set(fact.capabilities).size !== fact.capabilities.length
+  ) {
+    errors.push({
+      code: "invalid-capabilities",
+      anchor: anchor("capabilities"),
+    });
+  }
+  if (fact.gender !== null && !CAMPUS_MAP_V2_GENDERS.includes(fact.gender)) {
+    errors.push({ code: "invalid-gender", anchor: anchor("gender") });
+  }
+  if (CAMPUS_MAP_PLACE_TYPES.includes(fact.placeType)) {
+    const applicableFields = new Set(
+      CAMPUS_MAP_FACT_SCHEMA_V2.placeTypes[fact.placeType].applicableFields,
+    );
+    if (
+      Array.isArray(fact.capabilities) &&
+      fact.capabilities.length > 0 &&
+      !applicableFields.has("capabilities")
+    ) {
+      errors.push({
+        code: "field-not-applicable",
+        anchor: anchor("capabilities"),
+      });
+    }
+    if (
+      fact.gender !== null &&
+      CAMPUS_MAP_V2_GENDERS.includes(fact.gender) &&
+      !applicableFields.has("gender")
+    ) {
+      errors.push({ code: "field-not-applicable", anchor: anchor("gender") });
+    }
+  }
+  if (
+    fact.wheelchairAccess !== null &&
+    !CAMPUS_MAP_V2_WHEELCHAIR_ACCESS.includes(fact.wheelchairAccess)
+  ) {
+    errors.push({
+      code: "invalid-wheelchair-access",
+      anchor: anchor("wheelchairAccess"),
+    });
+  }
+  if (
+    fact.regularHours !== null &&
+    !isCampusMapRegularHours(fact.regularHours)
+  ) {
+    errors.push({
+      code: "invalid-regular-hours",
+      anchor: anchor("regularHours"),
+    });
+  }
+  if (
+    !Array.isArray(fact.officialActions) ||
+    fact.officialActions.length > CAMPUS_MAP_OFFICIAL_ACTION_MAX_COUNT
+  ) {
+    errors.push({
+      code: "invalid-official-actions",
+      anchor: anchor("officialActions"),
+    });
+  } else {
+    const identities = new Set<string>();
+    for (const [index, action] of fact.officialActions.entries()) {
+      const actionError = campusMapOfficialActionError(action);
+      if (actionError) {
+        errors.push({
+          code:
+            actionError === "invalid-label"
+              ? "invalid-official-action-label"
+              : "unsafe-official-action-url",
+          anchor: anchor(`officialActions.${index}`),
+        });
+      } else {
+        const identity = `${action.label.trim()}\u0000${action.url}`;
+        if (identities.has(identity)) {
+          errors.push({
+            code: "duplicate-official-action",
+            anchor: anchor(`officialActions.${index}`),
+          });
+        }
+        identities.add(identity);
+      }
+    }
+  }
+  if (
+    !campusMapOptionalShortTextIsValid(
+      fact.visitNote,
+      CAMPUS_MAP_VISIT_NOTE_MAX_BYTES,
+    )
+  ) {
+    errors.push({ code: "invalid-visit-note", anchor: anchor("visitNote") });
+  }
+  if (!validLocation(fact)) {
+    errors.push({ code: "invalid-location", anchor: anchor("location") });
+  }
+  if (fact.observedAt !== null && !validPostgresTimestamp(fact.observedAt)) {
+    errors.push({ code: "invalid-observed-at", anchor: anchor("observedAt") });
+  }
+  return errors;
+}
+
+function hasOnlyKeys(value: object, expected: string[]): boolean {
+  const keys = Object.keys(value).sort();
+  const expectedKeys = [...expected].sort();
+  return (
+    keys.length === expectedKeys.length &&
+    keys.every((key, index) => key === expectedKeys[index])
+  );
+}
+
+function validLocation(fact: CampusMapPublishFactInput): boolean {
+  const location = fact.location;
+  if (!isRecord(location)) return false;
+  if (location.kind === "building") {
+    return (
+      typeof fact.buildingId === "string" &&
+      isCampusMapUuid(fact.buildingId) &&
+      fact.floorId === null
+    );
+  }
+  if (location.kind === "floor") {
+    return (
+      typeof fact.buildingId === "string" &&
+      isCampusMapUuid(fact.buildingId) &&
+      typeof fact.floorId === "string" &&
+      isCampusMapUuid(fact.floorId)
+    );
+  }
+  return (
+    location.kind === "outdoor-point" &&
+    fact.buildingId === null &&
+    fact.floorId === null &&
+    typeof location.longitude === "number" &&
+    Number.isFinite(location.longitude) &&
+    location.longitude >= -180 &&
+    location.longitude <= 180 &&
+    typeof location.latitude === "number" &&
+    Number.isFinite(location.latitude) &&
+    location.latitude >= -90 &&
+    location.latitude <= 90 &&
+    location.crs === "wgs84" &&
+    (location.precision === "approximate" || location.precision === "precise")
+  );
+}
+
+export function validateSource(
+  source: CampusMapPublishSourceInput,
+  changeIndex: number,
+  sourceIndex: number,
+): CampusMapPublishValidationIssue[] {
+  const errors: CampusMapPublishValidationIssue[] = [];
+  const anchor = (field: string): CampusMapPublishIssueAnchor => ({
+    changeIndex,
+    field: `sources.${sourceIndex}.${field}`,
+  });
+  if (typeof source.ref !== "string" || source.ref.trim() === "") {
+    errors.push({ code: "source-ref-required", anchor: anchor("ref") });
+  } else if (containsInvalidCampusMapPostgresText(source.ref)) {
+    errors.push({ code: "source-ref-invalid", anchor: anchor("ref") });
+  } else if (campusMapUtf8ByteLength(source.ref) > MAX_SOURCE_REF_BYTES) {
+    errors.push({ code: "source-ref-too-long", anchor: anchor("ref") });
+  }
+  if (
+    source.kind !== "official" &&
+    source.kind !== "field-observation" &&
+    source.kind !== "open-data" &&
+    source.kind !== "provider-candidate" &&
+    source.kind !== "other"
+  ) {
+    errors.push({ code: "invalid-source-kind", anchor: anchor("kind") });
+  }
+  validateOptionalSourceText(
+    errors,
+    source.url,
+    MAX_SOURCE_URL_BYTES,
+    "source-url-too-long",
+    anchor("url"),
+  );
+  validateOptionalSourceText(
+    errors,
+    source.owner,
+    MAX_SOURCE_OWNER_BYTES,
+    "source-owner-too-long",
+    anchor("owner"),
+  );
+  validateOptionalSourceText(
+    errors,
+    source.version,
+    MAX_SOURCE_VERSION_BYTES,
+    "source-version-too-long",
+    anchor("version"),
+  );
+  validateOptionalSourceText(
+    errors,
+    source.snapshotHash,
+    MAX_SOURCE_HASH_BYTES,
+    "source-hash-too-long",
+    anchor("snapshotHash"),
+  );
+  validateOptionalSourceText(
+    errors,
+    source.limitations,
+    MAX_SOURCE_TEXT_BYTES,
+    "source-limitations-too-long",
+    anchor("limitations"),
+  );
+  validateOptionalSourceText(
+    errors,
+    source.note,
+    MAX_SOURCE_TEXT_BYTES,
+    "source-note-too-long",
+    anchor("note"),
+  );
+  if (!validDateOnly(source.accessedOn)) {
+    errors.push({
+      code: "invalid-source-accessed-on",
+      anchor: anchor("accessedOn"),
+    });
+  }
+  if (
+    source.observedAt !== null &&
+    !validPostgresTimestamp(source.observedAt)
+  ) {
+    errors.push({
+      code: "invalid-source-observed-at",
+      anchor: anchor("observedAt"),
+    });
+  }
+  if (
+    source.rightsStatus !== "public-domain" &&
+    source.rightsStatus !== "permission-granted" &&
+    source.rightsStatus !== "original-observation" &&
+    source.rightsStatus !== "restricted" &&
+    source.rightsStatus !== "unknown"
+  ) {
+    errors.push({
+      code: "invalid-source-rights",
+      anchor: anchor("rightsStatus"),
+    });
+  }
+  if (!validSourceCoordinate(source.sourceCoordinate)) {
+    errors.push({
+      code: "invalid-source-coordinate-lineage",
+      anchor: anchor("sourceCoordinate"),
+    });
+  }
+  return errors;
+}
+
+function validateOptionalSourceText(
+  errors: CampusMapPublishValidationIssue[],
+  value: unknown,
+  maxBytes: number,
+  code: string,
+  anchor: CampusMapPublishIssueAnchor,
+): void {
+  if (
+    value !== null &&
+    (typeof value !== "string" || containsInvalidCampusMapPostgresText(value))
+  ) {
+    errors.push({ code: "source-text-invalid", anchor });
+  } else if (
+    typeof value === "string" &&
+    campusMapUtf8ByteLength(value) > maxBytes
+  ) {
+    errors.push({ code, anchor });
+  }
+}
+
+export type IndexedPublishSource = {
+  source: CampusMapPublishSourceInput;
+  changeIndex: number;
+  sourceIndex: number;
+};
+
+export function analyzeSourceIdentities(command: CampusMapPublishCommand): {
+  errors: CampusMapPublishValidationIssue[];
+  sources: IndexedPublishSource[];
+} {
+  const byIdentity = new Map<string, IndexedPublishSource[]>();
+  const duplicateErrors: CampusMapPublishValidationIssue[] = [];
+  for (const [changeIndex, change] of command.changes.entries()) {
+    const identitiesInChange = new Set<string>();
+    for (const [sourceIndex, source] of change.sources.entries()) {
+      const identity = sourceIdentity(source);
+      const indexed = { source, changeIndex, sourceIndex };
+      if (identitiesInChange.has(identity)) {
+        duplicateErrors.push({
+          code: "duplicate-source-reference",
+          anchor: { changeIndex, field: `sources.${sourceIndex}.ref` },
+        });
+      } else {
+        identitiesInChange.add(identity);
+      }
+      byIdentity.set(identity, [...(byIdentity.get(identity) ?? []), indexed]);
+    }
+  }
+  const uniqueSources = [...byIdentity.values()].map((sources) => sources[0]);
+  if (duplicateErrors.length > 0) {
+    return { errors: duplicateErrors, sources: uniqueSources };
+  }
+  const inputMismatches = [...byIdentity.values()].flatMap((sources) => {
+    const expected = normalizedSourceMetadata(sources[0].source);
+    return sources
+      .slice(1)
+      .flatMap((candidate) =>
+        sameSourceMetadata(expected, normalizedSourceMetadata(candidate.source))
+          ? []
+          : [sourceRefMismatch(candidate)],
+      );
+  });
+  return { errors: inputMismatches, sources: uniqueSources };
+}
+
+export function sourceIdentity(source: {
+  kind: CampusMapProvenanceKind;
+  ref: string;
+}): string {
+  return `${source.kind}\u0000${source.ref}`;
+}
+
+export function sourceRefMismatch(
+  source: IndexedPublishSource,
+): CampusMapPublishValidationIssue {
+  return {
+    code: "source-ref-mismatch",
+    anchor: {
+      changeIndex: source.changeIndex,
+      field: `sources.${source.sourceIndex}.ref`,
+    },
+  };
+}
+
+type NormalizedSourceMetadata = ReturnType<typeof normalizedSourceMetadata>;
+
+function normalizedSourceMetadata(source: CampusMapPublishSourceInput) {
+  return {
+    url: source.url,
+    owner: source.owner,
+    version: source.version,
+    snapshotHash: source.snapshotHash,
+    accessedOn: source.accessedOn,
+    observedAt:
+      source.observedAt === null
+        ? null
+        : new Date(source.observedAt).toISOString(),
+    rightsStatus: source.rightsStatus,
+    limitations: source.limitations,
+    note: source.note,
+    sourceCoordinateX: source.sourceCoordinate?.x ?? null,
+    sourceCoordinateY: source.sourceCoordinate?.y ?? null,
+    sourceCoordinateCrs: source.sourceCoordinate?.crs ?? null,
+    conversionMethod: source.sourceCoordinate?.conversion?.method ?? null,
+    conversionVersion: source.sourceCoordinate?.conversion?.version ?? null,
+  };
+}
+
+function sameSourceMetadata(
+  left: NormalizedSourceMetadata,
+  right: NormalizedSourceMetadata,
+): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+export function toAppendProvenanceSource(
+  source: CampusMapPublishSourceInput,
+): CampusMapAppendProvenanceSource {
+  return {
+    kind: source.kind,
+    ref: source.ref,
+    url: source.url,
+    owner: source.owner,
+    version: source.version,
+    snapshotHash: source.snapshotHash,
+    accessedOn: source.accessedOn,
+    observedAt: source.observedAt === null ? null : new Date(source.observedAt),
+    rightsStatus: source.rightsStatus,
+    limitations: source.limitations,
+    note: source.note,
+    sourceCoordinateX: source.sourceCoordinate?.x ?? null,
+    sourceCoordinateY: source.sourceCoordinate?.y ?? null,
+    sourceCoordinateCrs: source.sourceCoordinate?.crs ?? null,
+    conversionMethod: source.sourceCoordinate?.conversion?.method ?? null,
+    conversionVersion: source.sourceCoordinate?.conversion?.version ?? null,
+  };
+}
+
+export function toAppendFact(
+  input: CampusMapPublishFactInput,
+): CampusMapAppendFact {
+  return {
+    name: input.name.trim(),
+    buildingId: input.buildingId,
+    floorId: input.floorId,
+    pinType: input.placeType,
+    capabilities: [...input.capabilities],
+    gender: input.gender,
+    wheelchairAccess: input.wheelchairAccess,
+    audience: "unknown",
+    credentialRequirement: "unknown",
+    accessSchedule: { kind: "unknown" },
+    reservationRequirement: "unknown",
+    temporaryStatus: null,
+    regularHours: input.regularHours
+      ? {
+          timezone: input.regularHours.timezone,
+          intervals: input.regularHours.intervals.map((interval) => ({
+            days: [...interval.days],
+            opensAt: interval.opensAt,
+            closesAt: interval.closesAt,
+          })),
+        }
+      : null,
+    officialActions: input.officialActions.map((action) => ({
+      label: action.label.trim(),
+      url: action.url,
+    })),
+    visitNote: input.visitNote?.trim() ?? null,
+    locationKind: input.location.kind,
+    pointPrecision:
+      input.location.kind === "outdoor-point" ? input.location.precision : null,
+    longitude:
+      input.location.kind === "outdoor-point" ? input.location.longitude : null,
+    latitude:
+      input.location.kind === "outdoor-point" ? input.location.latitude : null,
+    coordinateCrs:
+      input.location.kind === "outdoor-point" ? input.location.crs : null,
+    observedAt: input.observedAt === null ? null : new Date(input.observedAt),
+    verifiedAt: null,
+    verifiedByActorIdSnapshot: null,
+  };
+}
+
+function validDateOnly(value: unknown): boolean {
+  if (
+    typeof value !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(value) ||
+    value.startsWith("0000-")
+  ) {
+    return false;
+  }
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return (
+    Number.isFinite(parsed.getTime()) &&
+    parsed.toISOString().slice(0, 10) === value
+  );
+}
+
+function validPostgresTimestamp(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  const milliseconds = Date.parse(value);
+  return (
+    Number.isFinite(milliseconds) &&
+    milliseconds >= POSTGRES_TIMESTAMP_MIN_MILLISECONDS
+  );
+}
+
+function validSourceCoordinate(coordinate: unknown): boolean {
+  if (coordinate === null) return true;
+  if (!isRecord(coordinate)) return false;
+  if (
+    typeof coordinate.x !== "number" ||
+    typeof coordinate.y !== "number" ||
+    !Number.isFinite(coordinate.x) ||
+    !Number.isFinite(coordinate.y) ||
+    !CAMPUS_MAP_SOURCE_COORDINATE_CRS.some((crs) => crs === coordinate.crs)
+  ) {
+    return false;
+  }
+  if (
+    (coordinate.crs === "wgs84" || coordinate.crs === "gcj02") &&
+    (coordinate.x < -180 ||
+      coordinate.x > 180 ||
+      coordinate.y < -90 ||
+      coordinate.y > 90)
+  ) {
+    return false;
+  }
+  const conversion = coordinate.conversion;
+  if (coordinate.crs !== "wgs84" && conversion === null) return false;
+  if (conversion === null) return true;
+  return (
+    isRecord(conversion) &&
+    CAMPUS_MAP_COORDINATE_CONVERSION_METHODS.some(
+      (method) => method === conversion.method,
+    ) &&
+    typeof conversion.version === "string" &&
+    conversion.version.trim() !== "" &&
+    !containsInvalidCampusMapPostgresText(conversion.version) &&
+    campusMapUtf8ByteLength(conversion.version) <= MAX_SOURCE_VERSION_BYTES
+  );
+}

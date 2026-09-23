@@ -1,0 +1,352 @@
+import Link from "next/link";
+
+import { CampusMapPlaceCardContent } from "@/components/campus-map/place-card-content";
+import { PlaceFeedbackSection } from "@/components/campus-map/place-feedback-section";
+import { PlaceLifecycleControls } from "@/components/campus-map/place-lifecycle-controls";
+import { PlacePhotoGallery } from "@/components/campus-map/place-photo-gallery";
+import {
+  campusMapDisplayOptionLabel,
+  campusMapFactFieldLabel,
+  campusMapPinTypeLabel,
+  CAMPUS_MAP_DISPLAY_REGISTRY,
+} from "@/lib/campus-map/display-registry";
+import { isCampusMapPublicPlaceType } from "@/lib/campus-map/controlled-values";
+import { campusMapFloorDisplayLabel } from "@/lib/campus-map/floor-label";
+import type {
+  CampusMapHistoricalFact,
+  CampusMapHistoricalFactV1,
+  CampusMapPlaceHistoryHead,
+} from "@/lib/campus-map/fact-store";
+import { projectCampusMapPlaceCard } from "@/lib/campus-map/place-card";
+import type {
+  CampusMapPlaceFeedbackPage,
+  CampusMapPlaceFeedbackView,
+} from "@/lib/campus-map/place-feedback";
+import type { CampusMapPlacePhotoView } from "@/lib/campus-map/place-photos-contract";
+import {
+  encodeCampusMapPlaceEditHref,
+  safeCampusMapListReturnPath,
+} from "@/lib/campus-map/scene-codec";
+
+function scheduleLabel(schedule: CampusMapHistoricalFactV1["accessSchedule"]) {
+  if (schedule.kind !== "weekly") {
+    return campusMapDisplayOptionLabel("accessSchedule", schedule.kind);
+  }
+  return schedule.intervals
+    .map(
+      (interval) =>
+        `${interval.days
+          .map((day) => CAMPUS_MAP_DISPLAY_REGISTRY.weekdays[day])
+          .join("、")} ${interval.opensAt}–${interval.closesAt}`,
+    )
+    .join("；");
+}
+
+function locationLabel(
+  fact: CampusMapHistoricalFact,
+  building: {
+    name: string;
+    floorLabel: string | null;
+  } | null,
+) {
+  if (fact.locationKind === "outdoor-point") {
+    const precision =
+      fact.pointPrecision === "precise" ? "精确位置" : "大约位置";
+    return `室外 · ${precision}`;
+  }
+  if (!building) return "建筑资料暂不可用";
+  return fact.locationKind === "floor" && building.floorLabel
+    ? `${building.name} · ${campusMapFloorDisplayLabel(building.floorLabel)}`
+    : building.name;
+}
+
+function FactRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border bg-background/70 px-4 py-3">
+      <dt className="text-xs font-semibold tracking-wide text-muted-foreground">
+        {label}
+      </dt>
+      <dd className="mt-1 text-sm font-medium leading-6">{value}</dd>
+    </div>
+  );
+}
+
+function supportsPlaceFeedback(fact: CampusMapHistoricalFact) {
+  return fact.factSchemaVersion === 1
+    ? fact.pinType === "toilet"
+    : fact.placeType === "toilet";
+}
+
+export function CampusMapPlaceDetail({
+  placeId,
+  head,
+  fact,
+  retirementReason,
+  mapHref,
+  building,
+  isAdmin,
+  feedback,
+  viewerFeedback = null,
+  viewerCanWrite = true,
+  reviewsAfter = null,
+  photos = [],
+}: {
+  placeId: string;
+  head: CampusMapPlaceHistoryHead;
+  fact: CampusMapHistoricalFact | null;
+  retirementReason: string | null;
+  mapHref: string;
+  building: { name: string; floorLabel: string | null } | null;
+  isAdmin: boolean;
+  feedback?: CampusMapPlaceFeedbackPage;
+  viewerFeedback?: CampusMapPlaceFeedbackView | null;
+  viewerCanWrite?: boolean;
+  reviewsAfter?: string | null;
+  photos?: CampusMapPlacePhotoView[];
+}) {
+  const statusLabel = head.status === "retired" ? "地图已停用" : "地图已合并";
+  const feedbackView: CampusMapPlaceFeedbackPage = feedback ?? {
+    placeStatus: head.status,
+    summary: {
+      placeId,
+      averageRating: null,
+      ratingCount: 0,
+      reviewCount: 0,
+    },
+    page: { items: [], nextCursor: null, isPaginated: false },
+  };
+  const mapListReturnPath = safeCampusMapListReturnPath(mapHref);
+  const presentedFact =
+    fact?.factSchemaVersion === 2 && !isCampusMapPublicPlaceType(fact.placeType)
+      ? null
+      : fact;
+  const placeCard =
+    presentedFact?.factSchemaVersion === 2
+      ? projectCampusMapPlaceCard({
+          ...presentedFact,
+          locationLabel: locationLabel(presentedFact, building),
+        })
+      : null;
+  const feedbackEnabled = Boolean(
+    presentedFact && supportsPlaceFeedback(presentedFact),
+  );
+  const editHref =
+    presentedFact && viewerCanWrite
+      ? encodeCampusMapPlaceEditHref(placeId, head)
+      : null;
+
+  return (
+    <main className="w-full min-w-0 bg-[radial-gradient(circle_at_top_left,color-mix(in_oklab,var(--color-emerald-500)_10%,transparent),transparent_42%)] px-4 py-8 sm:px-6 lg:py-12">
+      <div className="mx-auto grid w-full max-w-4xl gap-6">
+        <header>
+          <Link
+            href={mapHref}
+            prefetch={false}
+            aria-label="返回地图"
+            className="inline-flex min-h-11 items-center rounded-lg px-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-emerald-200 dark:hover:bg-emerald-950/40"
+          >
+            ← 返回地图
+          </Link>
+          <div className="mt-3 flex flex-col items-start justify-between gap-4 sm:flex-row">
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight text-balance sm:text-3xl">
+                {head.name ?? "地点资料不可用"}
+              </h1>
+              {head.status !== "active" ? (
+                <span className="mt-3 inline-flex rounded-full bg-amber-100 px-3 py-1 text-sm font-semibold text-amber-800 dark:bg-amber-950 dark:text-amber-200">
+                  {statusLabel}
+                </span>
+              ) : null}
+            </div>
+          </div>
+        </header>
+
+        {head.status === "retired" ? (
+          <section className="rounded-2xl border border-amber-300 bg-amber-50 p-5 text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
+            <h2 className="font-semibold">这个地点已停用</h2>
+            <p className="mt-2 text-sm leading-6">
+              它不会出现在默认地图和搜索结果中，但稳定链接与公开编辑记录仍然保留。
+            </p>
+            {retirementReason ? (
+              <p className="mt-3 text-sm leading-6">
+                <span className="font-semibold">停用原因：</span>
+                {retirementReason}
+              </p>
+            ) : null}
+            <p className="mt-3 break-all text-xs text-amber-800 dark:text-amber-200">
+              稳定地点编号：{placeId}
+            </p>
+          </section>
+        ) : null}
+
+        {head.status === "merged" && head.mergedIntoPlaceId ? (
+          <section className="rounded-2xl border border-amber-300 bg-amber-50 p-5 dark:border-amber-900 dark:bg-amber-950/30">
+            <h2 className="font-semibold">这个地点已合并</h2>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              旧链接与历史仍然保留。请继续查看
+              <Link
+                className="ml-1 font-semibold text-foreground underline underline-offset-4"
+                href={`/campus-map/places/${head.mergedIntoPlaceId}`}
+              >
+                保留地点
+              </Link>
+              。
+            </p>
+          </section>
+        ) : null}
+
+        {presentedFact ? (
+          <section className="rounded-2xl border bg-card p-5 shadow-sm sm:p-6">
+            <h2 className="text-lg font-semibold">地点资料</h2>
+            {presentedFact.factSchemaVersion === 1 ? (
+              <dl className="mt-4 grid gap-3 sm:grid-cols-2">
+                <FactRow
+                  label={campusMapFactFieldLabel("pinType")}
+                  value={campusMapPinTypeLabel(presentedFact.pinType)}
+                />
+                <FactRow
+                  label={campusMapFactFieldLabel("location")}
+                  value={locationLabel(presentedFact, building)}
+                />
+                <FactRow
+                  label={campusMapFactFieldLabel("capabilities")}
+                  value={
+                    presentedFact.capabilities.length > 0
+                      ? presentedFact.capabilities
+                          .map((value) =>
+                            campusMapDisplayOptionLabel("capabilities", value),
+                          )
+                          .join("、")
+                      : "未记录"
+                  }
+                />
+                <FactRow
+                  label={campusMapFactFieldLabel("gender")}
+                  value={campusMapDisplayOptionLabel(
+                    "gender",
+                    presentedFact.gender,
+                  )}
+                />
+                <FactRow
+                  label={campusMapFactFieldLabel("audience")}
+                  value={campusMapDisplayOptionLabel(
+                    "audience",
+                    presentedFact.audience,
+                  )}
+                />
+                <FactRow
+                  label={campusMapFactFieldLabel("credentialRequirement")}
+                  value={campusMapDisplayOptionLabel(
+                    "credentialRequirement",
+                    presentedFact.credentialRequirement,
+                  )}
+                />
+                <FactRow
+                  label={campusMapFactFieldLabel("accessSchedule")}
+                  value={scheduleLabel(presentedFact.accessSchedule)}
+                />
+                <FactRow
+                  label={campusMapFactFieldLabel("reservationRequirement")}
+                  value={campusMapDisplayOptionLabel(
+                    "reservationRequirement",
+                    presentedFact.reservationRequirement,
+                  )}
+                />
+                <FactRow
+                  label={campusMapFactFieldLabel("temporaryStatus")}
+                  value={campusMapDisplayOptionLabel(
+                    "temporaryStatus",
+                    presentedFact.temporaryStatus,
+                  )}
+                />
+                <FactRow
+                  label={campusMapFactFieldLabel("wheelchairAccess")}
+                  value={campusMapDisplayOptionLabel(
+                    "wheelchairAccess",
+                    presentedFact.wheelchairAccess,
+                  )}
+                />
+              </dl>
+            ) : placeCard ? (
+              <div className="mt-4">
+                <p className="mb-4 text-sm font-semibold text-emerald-800 dark:text-emerald-200">
+                  {placeCard.placeTypeLabel}
+                </p>
+                <CampusMapPlaceCardContent card={placeCard} />
+              </div>
+            ) : null}
+            {photos.length > 0 ? (
+              <div className="mt-5 border-t pt-5">
+                <h3 className="text-sm font-semibold">地点照片</h3>
+                <PlacePhotoGallery photos={photos} />
+              </div>
+            ) : null}
+          </section>
+        ) : (
+          <section className="rounded-2xl border bg-card p-5 text-sm text-muted-foreground">
+            这份地点资料目前不可公开，但稳定链接和公开历史仍然保留。
+          </section>
+        )}
+
+        {feedbackEnabled ? (
+          <PlaceFeedbackSection
+            placeId={placeId}
+            feedback={feedbackView}
+            viewerFeedback={viewerFeedback}
+            viewerCanWrite={viewerCanWrite}
+            isAdmin={isAdmin}
+            reviewsAfter={reviewsAfter}
+            mapListReturnPath={mapListReturnPath}
+          />
+        ) : null}
+
+        <details
+          open={head.status !== "active" || !presentedFact}
+          className="border-t text-sm"
+        >
+          <summary className="min-h-11 cursor-pointer rounded-lg py-3 text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            更多操作
+          </summary>
+          <div className="flex flex-wrap gap-3 pb-3">
+            {editHref ? (
+              <Link
+                href={editHref}
+                prefetch={false}
+                className="inline-flex min-h-11 items-center rounded-lg px-2 text-sm text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                建议修改
+              </Link>
+            ) : null}
+            <a
+              href={`/campus-map/places/${placeId}/history${
+                mapListReturnPath
+                  ? `?from=${encodeURIComponent(mapListReturnPath)}`
+                  : ""
+              }`}
+              aria-label="查看编辑记录 / History"
+              className="inline-flex min-h-11 items-center rounded-lg px-2 text-sm text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              查看编辑记录
+            </a>
+          </div>
+        </details>
+
+        {isAdmin && (head.status === "active" || head.status === "retired") ? (
+          <section className="mt-4 rounded-2xl border border-dashed p-5 sm:p-6">
+            <h2 className="font-semibold">管理员操作</h2>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+              这些操作会追加公开修订，不会删除地点编号或历史。
+            </p>
+            <div className="mt-4">
+              <PlaceLifecycleControls
+                operation={head.status === "active" ? "retire" : "restore"}
+                placeId={placeId}
+                baseRevisionId={head.revisionId}
+              />
+            </div>
+          </section>
+        ) : null}
+      </div>
+    </main>
+  );
+}

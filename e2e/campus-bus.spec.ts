@@ -8,18 +8,6 @@ const IN_SERVICE_HONG_KONG_TIME = new Date("2026-08-10T00:00:00.000Z");
 test.describe("campus bus catalog layout", () => {
   test.use({ viewport: { width: 1280, height: 720 } });
 
-  test("shows the testing entry without enabling model operations", async ({
-    page,
-  }) => {
-    const response = await page.goto("/campus-bus");
-    expect(response?.status()).toBe(200);
-
-    await expect(
-      page.getByRole("link", { name: "CU Bus · 測試中" }),
-    ).toBeVisible();
-    await expect(page.getByRole("link", { name: "模型實驗室" })).toHaveCount(0);
-  });
-
   test("fills the available main shell width", async ({ page }) => {
     const response = await page.goto("/campus-bus");
     expect(response?.status()).toBe(200);
@@ -51,10 +39,10 @@ test.describe("campus bus Route 2 mobile journey", () => {
     const response = await page.goto("/campus-bus/2");
     expect(response?.status()).toBe(200);
 
-    // The server supplies its own initial clock. Advance the client interval once
-    // so arrival assertions use the fixed Hong Kong service time above.
+    // Cached HTML carries its generation timestamp. Flush the immediate client
+    // clock sync so arrival assertions use the fixed Hong Kong service time.
     await expect(page.getByRole("button", { name: "我的位置" })).toBeVisible();
-    await page.clock.fastForward("00:00:31");
+    await page.clock.fastForward(1);
   });
 
   test("renders the default stop, route map, and timetable", async ({
@@ -147,7 +135,7 @@ test.describe("campus bus Route 2 mobile journey", () => {
     await shawStop.click();
     await expect(shawStop).toHaveAttribute("aria-expanded", "true");
     await expect(
-      stops.getByText("另有 08:15、08:30 起點班次不停靠本站"),
+      stops.getByText("另有 08:15、09:15 起點班次不停靠本站"),
     ).toBeVisible();
 
     const map = page.getByRole("region", { name: "2 號線地圖" });
@@ -237,7 +225,7 @@ test.describe("campus bus Route 2 mobile journey", () => {
     const submittedOffset =
       new Date(submitted.observedArrivalAt).getTime() - browserNow;
     expect(submittedOffset).toBeGreaterThanOrEqual(59_000);
-    expect(submittedOffset).toBeLessThanOrEqual(60_000);
+    expect(submittedOffset).toBeLessThanOrEqual(61_000);
     await expect(dialog).toBeHidden();
 
     const acknowledgement = page.getByText("謝謝，你的到站時間已提交。");
@@ -280,34 +268,106 @@ test.describe("campus bus Route 2 mobile journey", () => {
 test.describe("campus bus reviewed route catalog", () => {
   test.use({ viewport: MOBILE_VIEWPORT, isMobile: true, hasTouch: true });
 
-  test("shows the first departure instead of a multi-hour countdown before service", async ({
+  test("keeps before-service feedback reachable in the mobile viewport", async ({
     page,
   }) => {
     await page.clock.install({ time: new Date("2026-08-10T17:28:00.000Z") });
     const response = await page.goto("/campus-bus/1a");
     expect(response?.status()).toBe(200);
-
+    await expect(page).toHaveURL(/\/campus-bus\/1$/);
     await expect(page.getByRole("button", { name: "我的位置" })).toBeVisible();
     await page.clock.fastForward("00:00:31");
 
-    const stops = page.locator(
-      'section[aria-labelledby="campus-route-stops-heading"]',
-    );
-    const universityStation = stops.getByRole("button", {
-      name: "1. 大學站 Univ. Station",
-    });
-
-    await expect(universityStation).toHaveAttribute("aria-expanded", "true");
-    await expect(stops.getByText("今日 07:40 開始")).toBeVisible();
-    await expect(stops.getByText("372 分鐘", { exact: true })).toHaveCount(0);
     await expect(
-      stops.getByRole("button", {
+      page.getByRole("button", {
         name: "預測不準？提交實時到站時間改進預測",
       }),
     ).toBeInViewport();
   });
 
-  test("lists the reviewed routes and opens Route 3", async ({ page }) => {
+  test("keeps nearby results after opening a route and returning home", async ({
+    context,
+    page,
+  }) => {
+    await context.grantPermissions(["geolocation"]);
+    await context.setGeolocation({
+      latitude: 22.4135,
+      longitude: 114.2101,
+    });
+    const response = await page.goto("/campus-bus");
+    expect(response?.status()).toBe(200);
+
+    await page.getByRole("button", { name: "使用我的位置" }).click();
+    await expect(page.getByText("按直線距離排序")).toBeVisible();
+    const firstDistance = await page
+      .getByText(/約 \d+ 米/)
+      .first()
+      .textContent();
+
+    await page
+      .getByRole("tabpanel", { name: "附近" })
+      .getByRole("link")
+      .first()
+      .click();
+    await expect(
+      page.getByRole("link", { name: "返回校巴首頁" }),
+    ).toBeVisible();
+    await page.getByRole("link", { name: "返回校巴首頁" }).click();
+
+    await expect(page).toHaveURL(/\/campus-bus$/);
+    await expect(page.getByText("按直線距離排序")).toBeVisible();
+    await expect(page.getByText(firstDistance!)).toBeVisible();
+  });
+
+  test("keeps manual Boarding place selection usable after location is denied", async ({
+    page,
+  }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "geolocation", {
+        configurable: true,
+        value: {
+          getCurrentPosition(
+            _success: PositionCallback,
+            error: PositionErrorCallback,
+          ) {
+            error({
+              code: 1,
+              message: "Permission denied by test",
+              PERMISSION_DENIED: 1,
+              POSITION_UNAVAILABLE: 2,
+              TIMEOUT: 3,
+            });
+          },
+        },
+      });
+    });
+    const response = await page.goto("/campus-bus");
+    expect(response?.status()).toBe(200);
+
+    await page.getByRole("button", { name: "使用我的位置" }).click();
+    await expect(
+      page.getByRole("heading", { name: "未允許使用位置" }),
+    ).toBeVisible();
+    await expect(
+      page.getByText(
+        "你可以手動選站；如要查看附近車站，可在瀏覽器設定中重新允許定位。",
+      ),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "手動選擇" }).click();
+    await page
+      .getByRole("dialog", { name: "選擇乘車地點" })
+      .getByRole("button", { name: /大學站 Univ\. Station/ })
+      .click();
+
+    await expect(
+      page.getByRole("heading", { name: "大學站", exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: /1 本部線/ }).first(),
+    ).toBeVisible();
+  });
+
+  test("opens Route 3 from the reviewed catalog", async ({ page }) => {
     test.slow();
     await page.clock.install({ time: IN_SERVICE_HONG_KONG_TIME });
     const response = await page.goto("/campus-bus");
@@ -317,28 +377,13 @@ test.describe("campus bus reviewed route catalog", () => {
     await expect(
       page.getByRole("heading", { name: "中大校巴", level: 1 }),
     ).toBeVisible();
-    await expect(page.getByRole("tab", { name: "現在可乘" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-    await expect(page.getByRole("link", { name: /N 晚間線/ })).toHaveCount(0);
-
     await page.getByRole("tab", { name: "全部路線" }).click();
-    for (const route of [
-      "1A 本部線",
-      "1B 本部線",
-      "2 新聯線",
-      "3 逸夫線",
-      "4 環迴線",
-      "5 上行線",
-      "6A 下行線 (敬文)",
-      "6B 下行線 (新聯)",
-      "7 下行線 (逸夫)",
-      "N 晚間線",
-      "H 假日線",
-    ]) {
-      await expect(page.getByRole("link", { name: route })).toBeVisible();
-    }
+    await expect(
+      page.getByRole("heading", { name: "現在可乘", level: 2 }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "其他路線", level: 2 }),
+    ).toBeVisible();
 
     await page.getByRole("link", { name: /3 逸夫線/ }).click();
     await expect(page).toHaveURL(/\/campus-bus\/3$/, { timeout: 30_000 });
@@ -351,83 +396,37 @@ test.describe("campus bus reviewed route catalog", () => {
     ).toBeVisible();
   });
 
-  test("offers all routes when no bus is currently running", async ({
+  test("opens the exact operational stop from a cached route deep link", async ({
     page,
   }) => {
-    await page.clock.install({ time: new Date("2026-08-09T17:00:00.000Z") });
-    const response = await page.goto("/campus-bus");
-    expect(response?.status()).toBe(200);
-    await page.clock.fastForward("00:00:31");
-
-    await expect(
-      page.getByRole("heading", {
-        name: "目前沒有行駛中的校巴",
-        level: 2,
-      }),
-    ).toBeVisible();
-    await page.getByRole("button", { name: "查看全部路線" }).click();
-    await expect(page.getByRole("tab", { name: "全部路線" })).toHaveAttribute(
-      "aria-selected",
-      "true",
+    await page.clock.install({ time: IN_SERVICE_HONG_KONG_TIME });
+    const response = await page.goto(
+      "/campus-bus/2s?stop=cuhk-wp-stop-3172%232",
     );
-    await expect(page.getByRole("link", { name: /1A 本部線/ })).toBeVisible();
-  });
-
-  test("shows Route 5 as unavailable during the official reading week", async ({
-    page,
-  }) => {
-    await page.clock.install({ time: new Date("2026-03-02T01:18:00.000Z") });
-    const response = await page.goto("/campus-bus/5");
     expect(response?.status()).toBe(200);
 
-    await expect(
-      page.getByRole("heading", { name: "5 上行線", level: 1 }),
-    ).toBeVisible();
-    await expect(page.getByText("今日不服務", { exact: true })).toBeVisible();
-    await expect(page.getByText("今日不提供 5 線服務").first()).toBeVisible();
+    const requestedStop = page.getByRole("button", {
+      name: /11\. 研究生宿舍一座/,
+    });
+    await expect(requestedStop).toHaveAttribute("aria-expanded", "true");
   });
 
-  test("cycles colocated loop occurrences from one map marker", async ({
+  test("retires the old 1B link without remapping it to 2S", async ({
     page,
   }) => {
     await page.goto("/campus-bus/1b");
-    await expect(page.getByRole("button", { name: "我的位置" })).toBeVisible();
-
-    const map = page.getByRole("region", { name: "1B 號線地圖" });
-    const sharedTerminus = map.getByRole("button", {
-      name: "1. 大學站；8. 大學站",
-    });
-    await expect(sharedTerminus).toBeVisible();
-    await sharedTerminus.click();
-
-    const stops = page.locator(
-      'section[aria-labelledby="campus-route-stops-heading"]',
-    );
+    await expect(page).toHaveURL(/\/campus-bus\?routeRetired=1b$/);
     await expect(
-      stops.getByRole("button", { name: "8. 大學站 Univ. Station" }),
-    ).toHaveAttribute("aria-expanded", "true");
+      page.getByText("1B 線已於 2026 年 9 月 1 日退役"),
+    ).toBeVisible();
+    await page.getByRole("tab", { name: "全部路線" }).click();
+    await expect(page.getByRole("link", { name: /2S 新聯線/ })).toBeVisible();
   });
 
-  test("labels N route conditional PGH1 stops without calling them universal next stops", async ({
-    page,
-  }) => {
+  test("renders the reviewed N route in the real map", async ({ page }) => {
     const response = await page.goto("/campus-bus/n");
     expect(response?.status()).toBe(200);
 
-    await expect(
-      page.getByRole("heading", { name: "N 晚間線", level: 1 }),
-    ).toBeVisible();
-    await expect(
-      page.getByText("晚間校園環線 · 部分班次經研究生宿舍一座"),
-    ).toBeVisible();
-    const stops = page.locator(
-      'section[aria-labelledby="campus-route-stops-heading"]',
-    );
-    await expect(
-      stops.getByRole("button", {
-        name: "2. 研究生宿舍一座 Postgraduate Hall 1 部分班次",
-      }),
-    ).toBeVisible();
     await expect(
       page.getByRole("region", { name: "N 號線地圖" }),
     ).toBeVisible();

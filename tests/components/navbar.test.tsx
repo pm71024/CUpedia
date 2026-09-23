@@ -11,39 +11,47 @@ import {
 } from "@testing-library/react";
 
 const {
-  achievementNoticeCount,
+  fetchMock,
   markAchievementNoticesSeen,
   push,
   refresh,
+  pathnameState,
+  sessionState,
   signOut,
   toastError,
+  mountedState,
 } = vi.hoisted(() => ({
-  achievementNoticeCount: vi.fn(),
+  fetchMock: vi.fn(),
   markAchievementNoticesSeen: vi.fn(),
   push: vi.fn(),
   refresh: vi.fn(),
+  pathnameState: { current: "/courses" },
+  sessionState: {
+    current: {
+      user: { email: "user@test.com", nickname: "TestUser", role: "user" },
+    } as { user: Record<string, unknown> } | null,
+  },
   signOut: vi.fn(),
   toastError: vi.fn(),
+  mountedState: { current: true },
 }));
 
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/courses",
+  usePathname: () => pathnameState.current,
   useRouter: () => ({ push, refresh }),
 }));
 
 vi.mock("@/lib/auth-client", () => ({
   authClient: {
     useSession: () => ({
-      data: {
-        user: { email: "user@test.com", nickname: "TestUser" },
-      },
+      data: sessionState.current,
     }),
     signOut,
   },
 }));
 
 vi.mock("@/hooks/use-mounted", () => ({
-  useMounted: () => true,
+  useMounted: () => mountedState.current,
 }));
 
 vi.mock("sonner", () => ({
@@ -51,18 +59,70 @@ vi.mock("sonner", () => ({
 }));
 
 vi.mock("@/lib/achievement-notice-actions", () => ({
-  getAchievementNoticeCount: achievementNoticeCount,
   markAchievementNoticesSeen,
 }));
 
 vi.mock("@/components/layout/command-search", () => ({
-  CommandSearch: () => null,
+  CommandSearch: ({
+    open,
+    onOpenChange,
+  }: {
+    open: boolean;
+    onOpenChange: (open: boolean) => void;
+  }) => (
+    <button
+      onClick={() => onOpenChange(!open)}
+      aria-label="搜索"
+      data-open={String(open)}
+    >
+      搜索
+    </button>
+  ),
+}));
+
+vi.mock("@/components/layout/mobile-product-menu", () => ({
+  MobileProductMenu: ({
+    open,
+    onOpenChange,
+  }: {
+    open: boolean;
+    onOpenChange: (open: boolean) => void;
+  }) => (
+    <button
+      onClick={() => onOpenChange(!open)}
+      aria-label="产品菜单"
+      data-open={String(open)}
+    >
+      产品菜单
+    </button>
+  ),
+}));
+
+vi.mock("@/components/layout/notification-center", () => ({
+  NotificationCenter: ({
+    open,
+    onOpenChange,
+  }: {
+    open: boolean;
+    onOpenChange: (open: boolean) => void;
+  }) => (
+    <button
+      onClick={() => onOpenChange(!open)}
+      aria-label="通知"
+      data-open={String(open)}
+    >
+      通知
+    </button>
+  ),
 }));
 
 vi.mock("@/components/ui/dropdown-menu", () => ({
   DropdownMenu: ({ children }: { children: React.ReactNode }) => children,
-  DropdownMenuTrigger: ({ children }: { children: React.ReactNode }) => (
-    <button>{children}</button>
+  DropdownMenuTrigger: ({
+    children,
+    ...props
+  }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
+    <button {...props}>{children}</button>
   ),
   DropdownMenuContent: ({ children }: { children: React.ReactNode }) => (
     <div>{children}</div>
@@ -99,9 +159,18 @@ import { AchievementNoticesSeen } from "@/components/courses/achievement-notices
 describe("Navbar sign-out", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubGlobal("fetch", fetchMock);
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ count: 0 }),
+    });
     signOut.mockResolvedValue({ error: null });
-    achievementNoticeCount.mockResolvedValue(0);
     markAchievementNoticesSeen.mockResolvedValue(undefined);
+    mountedState.current = true;
+    pathnameState.current = "/courses";
+    sessionState.current = {
+      user: { email: "user@test.com", nickname: "TestUser", role: "user" },
+    };
   });
 
   it("navigates to login and refreshes after sign-out succeeds", async () => {
@@ -156,21 +225,134 @@ describe("Navbar sign-out", () => {
         .getByRole("link", { name: "CU Bus · 測試中" })
         .getAttribute("href"),
     ).toBe("/campus-bus");
+    expect(screen.queryByRole("link", { name: "模型實驗室" })).toBeNull();
+  });
+
+  it("offers a public product updates entry", () => {
+    render(<Navbar />);
+
+    expect(
+      screen.getByRole("link", { name: "产品更新" }).getAttribute("href"),
+    ).toBe("/updates");
+  });
+
+  it("reserves stable notification and account slots during hydration and logout", () => {
+    mountedState.current = false;
+    const { rerender } = render(<Navbar />);
+
+    expect(screen.getByTestId("notification-slot").className).toContain(
+      "size-11",
+    );
+    const hydratingAccountSlot = screen.getByTestId("account-slot");
+    const stableAccountSlotClassName = hydratingAccountSlot.className;
+    expect(hydratingAccountSlot.className).toContain("size-11");
+    expect(hydratingAccountSlot.className).toContain("md:w-[4.5rem]");
+    expect(hydratingAccountSlot.className).toContain("xl:w-40");
+
+    mountedState.current = true;
+    sessionState.current = null;
+    rerender(<Navbar />);
+
+    expect(screen.getByTestId("notification-slot").className).toContain(
+      "size-11",
+    );
+    expect(screen.getByTestId("account-slot").className).toBe(
+      stableAccountSlotClassName,
+    );
+
+    sessionState.current = {
+      user: {
+        email: "admin@test.com",
+        nickname: "Administrator",
+        role: "admin",
+      },
+    };
+    rerender(<Navbar />);
+
+    expect(screen.getByTestId("account-slot").className).toBe(
+      stableAccountSlotClassName,
+    );
+  });
+
+  it("keeps long user and administrator identities inside the fixed account control", () => {
+    sessionState.current = {
+      user: {
+        email: "admin@test.com",
+        nickname: "一个非常非常长但不应该挤压导航的管理员昵称",
+        role: "admin",
+      },
+    };
+
+    render(<Navbar />);
+
+    const account = screen.getByRole("button", {
+      name: "一个非常非常长但不应该挤压导航的管理员昵称",
+    });
+    expect(account.className).toContain("size-11");
+    expect(account.querySelector(".max-w-32")?.className).toContain("truncate");
+  });
+
+  it("keeps search, notifications, account, and product menu mutually exclusive", () => {
+    render(<Navbar />);
+
+    fireEvent.click(screen.getByRole("button", { name: "搜索" }));
+    fireEvent.click(screen.getByRole("button", { name: "通知" }));
+    fireEvent.click(screen.getByRole("button", { name: "产品菜单" }));
+
+    expect(screen.getByRole("button", { name: "搜索" }).dataset.open).toBe(
+      "false",
+    );
+    expect(screen.getByRole("button", { name: "通知" }).dataset.open).toBe(
+      "false",
+    );
+    expect(screen.getByRole("button", { name: "产品菜单" }).dataset.open).toBe(
+      "true",
+    );
   });
 
   it("shows achievement notices on the visible account trigger", async () => {
-    achievementNoticeCount.mockResolvedValue(3);
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ count: 3 }),
+    });
 
     render(<Navbar />);
 
     expect(
       (await screen.findByTestId("achievement-notice-badge")).textContent,
     ).toBe("3");
+    expect(fetchMock).toHaveBeenCalledWith("/api/achievement-notices/count", {
+      cache: "no-store",
+    });
+  });
+
+  it.each([
+    ["a non-success response", { ok: false, json: async () => ({ count: 0 }) }],
+    ["a malformed response", { ok: true, json: async () => ({}) }],
+  ])("keeps the current badge after %s", async (_name, failedResponse) => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ count: 3 }),
+    });
+    const { rerender } = render(<Navbar />);
+    await screen.findByTestId("achievement-notice-badge");
+
+    fetchMock.mockResolvedValueOnce(failedResponse);
+    pathnameState.current = "/wiki";
+    rerender(<Navbar />);
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(screen.getByTestId("achievement-notice-badge").textContent).toBe(
+      "3",
+    );
   });
 
   it("clears the badge after achievement notices are marked as seen", async () => {
     let finishMarking!: () => void;
-    achievementNoticeCount.mockResolvedValue(3);
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ count: 3 }),
+    });
     markAchievementNoticesSeen.mockReturnValue(
       new Promise<void>((resolve) => {
         finishMarking = resolve;

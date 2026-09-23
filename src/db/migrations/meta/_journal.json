@@ -519,6 +519,412 @@
       "when": 1786589206889,
       "tag": "0073_course_rating_language",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1786595209217,
+      "tag": "0074_equal_doomsday",
+      "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1786608007887,
+      "tag": "0075_normalize-canteen-menu-source-identity",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1786608008654,
+      "tag": "0076_provision-and-backfill-canteen-menu-sources",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1786611076290,
+      "tag": "0077_normalize-qmai-source-owner",
+      "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1786614937116,
+      "tag": "0078_observe-canteen-menu-sync-runs",
+      "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1786615605993,
+      "tag": "0079_lock-down-canteen-menu-integration-tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1786637543540,
+      "tag": "0080_repair-legacy-canteen-menu-source-alias",
+      "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1786640542977,
+      "tag": "0081_preserve-provider-menu-offering-identity",
+      "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1786670330034,
+      "tag": "0082_bright_photon",
+      "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1786697189668,
+      "tag": "0083_next_doorman",
+      "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1786756224117,
+      "tag": "0084_prepare-shadow-free-menu-identity-writes",
+      "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "7",
+      "when": 1786986064554,
+      "tag": "0085_glossy_namor",
+      "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1787216885298,
+      "tag": "0086_nervous_skullbuster",
+      "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1787300257591,
+      "tag": "0087_canteen-menu-sync-snapshots",
+      "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1787305743128,
+      "tag": "0088_lowly_alex_power",
+      "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1787501919934,
+      "tag": "0089_canteen-menu-source-sync-schedule",
+      "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "7",
+      "when": 1787501920567,
+      "tag": "0090_configure-cafe-tolo-sync-schedule",
+      "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "7",
+      "when": 1787554650225,
+      "tag": "0091_perpetual_taskmaster",
+      "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1787555520061,
+      "tag": "0092_provision-cw-chu-qmai-menu-source",
+      "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1787556741800,
+      "tag": "0093_late_meggan",
+      "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1787720667246,
+      "tag": "0094_supabase-canteen-menu-sync-cron",
+      "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1787747407237,
+      "tag": "0095_harden-supabase-canteen-menu-sync-cron",
+      "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1787810000000,
+      "tag": "0096_confirm-empty-menu-health",
+      "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1787814309979,
+      "tag": "0097_canteen-canonical-provider-offerings",
+      "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "7",
+      "when": 1787818572345,
+      "tag": "0098_canteen-menu-identity-evolution",
+      "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "7",
+      "when": 1787888844946,
+      "tag": "0099_professor-portrait-assets",
+      "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "7",
+      "when": 1788101000000,
+      "tag": "0100_canonical_campus_map_fact_store",
+      "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "7",
+      "when": 1788101000001,
+      "tag": "0101_campus_map_finite_source_coordinates",
+      "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "7",
+      "when": 1788101000002,
+      "tag": "0102_campus_map_fact_ledger_hardening",
+      "breakpoints": true
+    },
+    {
+      "idx": 103,
+      "version": "7",
+      "when": 1788101000003,
+      "tag": "0103_deep_phantom_reporter",
+      "breakpoints": true
+    },
+    {
+      "idx": 104,
+      "version": "7",
+      "when": 1788101000004,
+      "tag": "0104_cynical_cassandra_nova",
+      "breakpoints": true
+    },
+    {
+      "idx": 105,
+      "version": "7",
+      "when": 1788101000005,
+      "tag": "0105_smiling_spot",
+      "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "7",
+      "when": 1788101000006,
+      "tag": "0106_stiff_firebird",
+      "breakpoints": true
+    },
+    {
+      "idx": 107,
+      "version": "7",
+      "when": 1788101000007,
+      "tag": "0107_faulty_pride",
+      "breakpoints": true
+    },
+    {
+      "idx": 108,
+      "version": "7",
+      "when": 1788101000008,
+      "tag": "0108_campus_map_schema_immutability",
+      "breakpoints": true
+    },
+    {
+      "idx": 109,
+      "version": "7",
+      "when": 1788101000009,
+      "tag": "0109_campus-map-provenance-immutability",
+      "breakpoints": true
+    },
+    {
+      "idx": 110,
+      "version": "7",
+      "when": 1788101000010,
+      "tag": "0110_campus-map-schema-function-hardening",
+      "breakpoints": true
+    },
+    {
+      "idx": 111,
+      "version": "7",
+      "when": 1788101000011,
+      "tag": "0111_campus-map-notes",
+      "breakpoints": true
+    },
+    {
+      "idx": 112,
+      "version": "7",
+      "when": 1788101000012,
+      "tag": "0112_campus-map-note-event-immutability",
+      "breakpoints": true
+    },
+    {
+      "idx": 113,
+      "version": "7",
+      "when": 1788101000013,
+      "tag": "0113_campus-map-moderation-governance",
+      "breakpoints": true
+    },
+    {
+      "idx": 114,
+      "version": "7",
+      "when": 1788101000014,
+      "tag": "0114_campus-map-moderation-ledger-guards",
+      "breakpoints": true
+    },
+    {
+      "idx": 115,
+      "version": "7",
+      "when": 1788101000015,
+      "tag": "0115_stale_nightshade",
+      "breakpoints": true
+    },
+    {
+      "idx": 116,
+      "version": "7",
+      "when": 1788101000016,
+      "tag": "0116_campus-map-provider-mapping-ledger-guards",
+      "breakpoints": true
+    },
+    {
+      "idx": 117,
+      "version": "7",
+      "when": 1788101660138,
+      "tag": "0117_campus-map-release-rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 118,
+      "version": "7",
+      "when": 1788101740615,
+      "tag": "0118_campus-map-moderation-rate-limit-rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 119,
+      "version": "7",
+      "when": 1788239358500,
+      "tag": "0119_campus-map-place-feedback",
+      "breakpoints": true
+    },
+    {
+      "idx": 120,
+      "version": "7",
+      "when": 1788319112543,
+      "tag": "0120_bootstrap_campus_map_buildings",
+      "breakpoints": true
+    },
+    {
+      "idx": 121,
+      "version": "7",
+      "when": 1788357558052,
+      "tag": "0121_campus-map-place-photos",
+      "breakpoints": true
+    },
+    {
+      "idx": 122,
+      "version": "7",
+      "when": 1788361576762,
+      "tag": "0122_magical_kid_colt",
+      "breakpoints": true
+    },
+    {
+      "idx": 123,
+      "version": "7",
+      "when": 1788419803630,
+      "tag": "0123_campus_map_amap_hotspot_mappings",
+      "breakpoints": true
+    },
+    {
+      "idx": 124,
+      "version": "7",
+      "when": 1788620203841,
+      "tag": "0124_campus_map_fact_v2",
+      "breakpoints": true
+    },
+    {
+      "idx": 125,
+      "version": "7",
+      "when": 1788624346321,
+      "tag": "0125_campus_map_regular_hours_validation",
+      "breakpoints": true
+    },
+    {
+      "idx": 126,
+      "version": "7",
+      "when": 1788763256777,
+      "tag": "0126_campus-map-floor-label-preflight",
+      "breakpoints": true
+    },
+    {
+      "idx": 127,
+      "version": "7",
+      "when": 1788766795313,
+      "tag": "0127_campus-map-floor-label-identity",
+      "breakpoints": true
+    },
+    {
+      "idx": 128,
+      "version": "7",
+      "when": 1788858168515,
+      "tag": "0128_campus_map_known_building_floors",
+      "breakpoints": true
+    },
+    {
+      "idx": 129,
+      "version": "7",
+      "when": 1788858401265,
+      "tag": "0129_campus_map_known_floor_order",
+      "breakpoints": true
+    },
+    {
+      "idx": 130,
+      "version": "7",
+      "when": 1788859096946,
+      "tag": "0130_campus_map_cheng_ming_hotspot",
+      "breakpoints": true
+    },
+    {
+      "idx": 131,
+      "version": "7",
+      "when": 1788978494733,
+      "tag": "0131_campus_map_official_facility_floors",
+      "breakpoints": true
     }
   ]
 }
